@@ -1,4 +1,4 @@
-import { OpenAIEmbeddings, OpenAIEmbeddingsParams } from '@langchain/openai'
+import { ClientOptions, OpenAIEmbeddings, OpenAIEmbeddingsParams } from '@langchain/openai'
 import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
 
@@ -15,9 +15,9 @@ class OpenAIEmbeddingCustom_Embeddings implements INode {
     inputs: INodeParams[]
 
     constructor() {
-        this.label = 'OpenAI Embeddings Custom'
+        this.label = 'OpenAI Custom Embedding'
         this.name = 'openAIEmbeddingsCustom'
-        this.version = 1.0
+        this.version = 3.0
         this.type = 'OpenAIEmbeddingsCustom'
         this.icon = 'openai.svg'
         this.category = 'Embeddings'
@@ -52,10 +52,19 @@ class OpenAIEmbeddingCustom_Embeddings implements INode {
                 additionalParams: true
             },
             {
-                label: 'BasePath',
+                label: 'Base Path',
                 name: 'basepath',
                 type: 'string',
                 optional: true,
+                description: 'Override the default base URL for the API, e.g., "https://api.example.com/v2/',
+                additionalParams: true
+            },
+            {
+                label: 'Base Options',
+                name: 'baseOptions',
+                type: 'json',
+                optional: true,
+                description: 'Default headers to include with every request to the API.',
                 additionalParams: true
             },
             {
@@ -63,6 +72,30 @@ class OpenAIEmbeddingCustom_Embeddings implements INode {
                 name: 'modelName',
                 type: 'string',
                 optional: true
+            },
+            {
+                label: 'Dimensions',
+                name: 'dimensions',
+                type: 'number',
+                optional: true,
+                additionalParams: true
+            },
+            {
+                label: 'Encoding Format',
+                name: 'encodingFormat',
+                type: 'options',
+                options: [
+                    {
+                        label: 'float',
+                        name: 'float'
+                    },
+                    {
+                        label: 'base64',
+                        name: 'base64'
+                    }
+                ],
+                optional: true,
+                additionalParams: true
             }
         ]
     }
@@ -73,11 +106,14 @@ class OpenAIEmbeddingCustom_Embeddings implements INode {
         const timeout = nodeData.inputs?.timeout as string
         const basePath = nodeData.inputs?.basepath as string
         const modelName = nodeData.inputs?.modelName as string
+        const dimensions = nodeData.inputs?.dimensions as string
+        const baseOptions = nodeData.inputs?.baseOptions
+        const encodingFormat = nodeData.inputs?.encodingFormat as 'float' | 'base64' | undefined
 
         const credentialData = await getCredentialData(nodeData.credential ?? '', options)
         const openAIApiKey = getCredentialParam('openAIApiKey', credentialData, nodeData)
 
-        const obj: Partial<OpenAIEmbeddingsParams> & { openAIApiKey?: string } = {
+        const obj: Partial<OpenAIEmbeddingsParams> & { openAIApiKey?: string; configuration?: ClientOptions } = {
             openAIApiKey
         }
 
@@ -85,8 +121,26 @@ class OpenAIEmbeddingCustom_Embeddings implements INode {
         if (batchSize) obj.batchSize = parseInt(batchSize, 10)
         if (timeout) obj.timeout = parseInt(timeout, 10)
         if (modelName) obj.modelName = modelName
+        if (dimensions) obj.dimensions = parseInt(dimensions, 10)
+        if (encodingFormat) obj.encodingFormat = encodingFormat
 
-        const model = new OpenAIEmbeddings(obj, { basePath })
+        let parsedBaseOptions: any | undefined = undefined
+        if (baseOptions) {
+            try {
+                parsedBaseOptions = typeof baseOptions === 'object' ? baseOptions : JSON.parse(baseOptions)
+            } catch (exception) {
+                throw new Error("Invalid JSON in the ChatOpenAI's BaseOptions: " + exception)
+            }
+        }
+
+        if (basePath || parsedBaseOptions) {
+            obj.configuration = {
+                baseURL: basePath,
+                defaultHeaders: parsedBaseOptions
+            }
+        }
+
+        const model = new OpenAIEmbeddings(obj)
         return model
     }
 }

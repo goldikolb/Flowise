@@ -1,9 +1,14 @@
+import { BaseMessage } from '@langchain/core/messages'
+import { BufferMemory, BufferWindowMemory, ConversationSummaryMemory, ConversationSummaryBufferMemory } from '@langchain/classic/memory'
+import { Moderation } from '../nodes/moderation/Moderation'
+
 /**
  * Types
  */
 
 export type NodeParamsType =
     | 'asyncOptions'
+    | 'asyncMultiOptions'
     | 'options'
     | 'multiOptions'
     | 'datagrid'
@@ -16,12 +21,17 @@ export type NodeParamsType =
     | 'date'
     | 'file'
     | 'folder'
+    | 'tabs'
 
 export type CommonType = string | number | boolean | undefined | null
 
 export type MessageType = 'apiMessage' | 'userMessage'
 
 export type ImageDetail = 'auto' | 'low' | 'high'
+
+export type ClientType = 'agentflowv2' | 'agentflowsdk'
+
+export const VALID_CLIENT_TYPES = new Set<ClientType>(['agentflowv2', 'agentflowsdk'])
 
 /**
  * Others
@@ -52,13 +62,19 @@ export interface INodeOptionsValue {
     label: string
     name: string
     description?: string
+    imageSrc?: string
+    client?: Array<ClientType>
+    show?: INodeDisplay
+    hide?: INodeDisplay
 }
 
 export interface INodeOutputsValue {
     label: string
     name: string
-    baseClasses: string[]
+    baseClasses?: string[]
     description?: string
+    hidden?: boolean
+    isAnchor?: boolean
 }
 
 export interface INodeParams {
@@ -76,12 +92,29 @@ export interface INodeParams {
     rows?: number
     list?: boolean
     acceptVariable?: boolean
+    acceptNodeOutputAsVariable?: boolean
     placeholder?: string
     fileType?: string
     additionalParams?: boolean
     loadMethod?: string
+    loadConfig?: boolean
     hidden?: boolean
-    variables?: ICommonObject[]
+    client?: Array<ClientType>
+    hideCodeExecute?: boolean
+    codeExample?: string
+    hint?: Record<string, string>
+    tabIdentifier?: string
+    tabs?: Array<INodeParams>
+    refresh?: boolean
+    freeSolo?: boolean
+    loadPreviousNodes?: boolean
+    array?: Array<INodeParams>
+    show?: INodeDisplay
+    hide?: INodeDisplay
+    generateDocStoreDescription?: boolean
+    generateInstruction?: boolean
+    minItems?: number
+    maxItems?: number
 }
 
 export interface INodeExecutionData {
@@ -89,7 +122,7 @@ export interface INodeExecutionData {
 }
 
 export interface INodeDisplay {
-    [key: string]: string[] | string
+    [key: string]: string[] | string | boolean | number | ICommonObject
 }
 
 export interface INodeProperties {
@@ -104,18 +137,27 @@ export interface INodeProperties {
     description?: string
     filePath?: string
     badge?: string
+    deprecateMessage?: string
+    hideOutput?: boolean
+    hideInput?: boolean
+    author?: string
+    documentation?: string
+    color?: string
+    hint?: string
+    warning?: string
 }
 
 export interface INode extends INodeProperties {
+    credential?: INodeParams
     inputs?: INodeParams[]
     output?: INodeOutputsValue[]
     loadMethods?: {
         [key: string]: (nodeData: INodeData, options?: ICommonObject) => Promise<INodeOptionsValue[]>
     }
     vectorStoreMethods?: {
-        upsert: (nodeData: INodeData, options?: ICommonObject) => Promise<void>
+        upsert: (nodeData: INodeData, options?: ICommonObject) => Promise<IndexingResult | void>
         search: (nodeData: INodeData, options?: ICommonObject) => Promise<any>
-        delete: (nodeData: INodeData, options?: ICommonObject) => Promise<void>
+        delete: (nodeData: INodeData, ids: string[], options?: ICommonObject) => Promise<void>
     }
     init?(nodeData: INodeData, input: string, options?: ICommonObject): Promise<any>
     run?(nodeData: INodeData, input: string, options?: ICommonObject): Promise<string | ICommonObject>
@@ -140,12 +182,88 @@ export interface INodeCredential {
 export interface IMessage {
     message: string
     type: MessageType
+    role?: MessageType
+    content?: string
 }
 
 export interface IUsedTool {
     tool: string
     toolInput: object
     toolOutput: string | object
+    sourceDocuments?: ICommonObject[]
+    error?: string
+}
+
+export interface IMultiAgentNode {
+    node: any
+    name: string
+    label: string
+    type: 'supervisor' | 'worker'
+    llm?: any
+    parentSupervisorName?: string
+    workers?: string[]
+    workerPrompt?: string
+    workerInputVariables?: string[]
+    recursionLimit?: number
+    moderations?: Moderation[]
+    multiModalMessageContent?: MessageContentImageUrl[]
+    checkpointMemory?: any
+}
+
+type SeqAgentType = 'agent' | 'condition' | 'end' | 'start' | 'tool' | 'state' | 'llm' | 'utilities'
+export type ConversationHistorySelection = 'user_question' | 'last_message' | 'all_messages' | 'empty'
+
+export interface ISeqAgentNode {
+    id: string
+    node: any
+    name: string
+    label: string
+    type: SeqAgentType
+    output: string
+    llm?: any
+    startLLM?: any
+    predecessorAgents?: ISeqAgentNode[]
+    recursionLimit?: number
+    moderations?: Moderation[]
+    multiModalMessageContent?: MessageContentImageUrl[]
+    checkpointMemory?: any
+    agentInterruptToolNode?: any
+    agentInterruptToolFunc?: any
+}
+
+export interface ITeamState {
+    messages: {
+        value: (x: BaseMessage[], y: BaseMessage[]) => BaseMessage[]
+        default: () => BaseMessage[]
+    }
+    team_members: string[]
+    next: string
+    instructions: string
+    summarization?: string
+}
+
+export interface ISeqAgentsState {
+    messages: {
+        value: (x: BaseMessage[], y: BaseMessage[]) => BaseMessage[]
+        default: () => BaseMessage[]
+    }
+}
+
+export interface IAgentReasoning {
+    agentName: string
+    messages: string[]
+    next?: string
+    instructions?: string
+    usedTools?: IUsedTool[]
+    sourceDocuments?: ICommonObject[]
+    state?: ICommonObject
+    nodeName?: string
+}
+
+export interface IAction {
+    id?: string
+    elements?: Array<{ type: string; label: string }>
+    mapping?: { approve: string; reject: string; toolCalls: any[] }
 }
 
 export interface IFileUpload {
@@ -175,12 +293,18 @@ export type MessageContentImageUrl = {
           }
 }
 
+export interface IDocument<Metadata extends Record<string, any> = Record<string, any>> {
+    pageContent: string
+    metadata: Metadata
+}
+
 /**
  * Classes
  */
 
 import { PromptTemplate as LangchainPromptTemplate, PromptTemplateInput } from '@langchain/core/prompts'
 import { VectorStore } from '@langchain/core/vectorstores'
+import { Document } from '@langchain/core/documents'
 
 export class PromptTemplate extends LangchainPromptTemplate {
     promptValues: ICommonObject
@@ -232,11 +356,13 @@ export class VectorStoreRetriever {
 /**
  * Implement abstract classes and interface for memory
  */
-import { BaseMessage } from '@langchain/core/messages'
-import { BufferMemory, BufferWindowMemory, ConversationSummaryMemory } from 'langchain/memory'
 
 export interface MemoryMethods {
-    getChatMessages(overrideSessionId?: string, returnBaseMessages?: boolean, prevHistory?: IMessage[]): Promise<IMessage[] | BaseMessage[]>
+    getChatMessages(
+        overrideSessionId?: string,
+        returnBaseMessages?: boolean,
+        prependMessages?: IMessage[]
+    ): Promise<IMessage[] | BaseMessage[]>
     addChatMessages(msgArray: { text: string; type: MessageType }[], overrideSessionId?: string): Promise<void>
     clearChatMessages(overrideSessionId?: string): Promise<void>
 }
@@ -245,7 +371,7 @@ export abstract class FlowiseMemory extends BufferMemory implements MemoryMethod
     abstract getChatMessages(
         overrideSessionId?: string,
         returnBaseMessages?: boolean,
-        prevHistory?: IMessage[]
+        prependMessages?: IMessage[]
     ): Promise<IMessage[] | BaseMessage[]>
     abstract addChatMessages(msgArray: { text: string; type: MessageType }[], overrideSessionId?: string): Promise<void>
     abstract clearChatMessages(overrideSessionId?: string): Promise<void>
@@ -255,7 +381,7 @@ export abstract class FlowiseWindowMemory extends BufferWindowMemory implements 
     abstract getChatMessages(
         overrideSessionId?: string,
         returnBaseMessages?: boolean,
-        prevHistory?: IMessage[]
+        prependMessages?: IMessage[]
     ): Promise<IMessage[] | BaseMessage[]>
     abstract addChatMessages(msgArray: { text: string; type: MessageType }[], overrideSessionId?: string): Promise<void>
     abstract clearChatMessages(overrideSessionId?: string): Promise<void>
@@ -265,10 +391,29 @@ export abstract class FlowiseSummaryMemory extends ConversationSummaryMemory imp
     abstract getChatMessages(
         overrideSessionId?: string,
         returnBaseMessages?: boolean,
-        prevHistory?: IMessage[]
+        prependMessages?: IMessage[]
     ): Promise<IMessage[] | BaseMessage[]>
     abstract addChatMessages(msgArray: { text: string; type: MessageType }[], overrideSessionId?: string): Promise<void>
     abstract clearChatMessages(overrideSessionId?: string): Promise<void>
+}
+
+export abstract class FlowiseSummaryBufferMemory extends ConversationSummaryBufferMemory implements MemoryMethods {
+    abstract getChatMessages(
+        overrideSessionId?: string,
+        returnBaseMessages?: boolean,
+        prependMessages?: IMessage[]
+    ): Promise<IMessage[] | BaseMessage[]>
+    abstract addChatMessages(msgArray: { text: string; type: MessageType }[], overrideSessionId?: string): Promise<void>
+    abstract clearChatMessages(overrideSessionId?: string): Promise<void>
+}
+
+export type IndexingResult = {
+    numAdded: number
+    numDeleted: number
+    numUpdated: number
+    numSkipped: number
+    totalKeys: number
+    addedDocs: Document[]
 }
 
 export interface IVisionChatModal {
@@ -276,7 +421,76 @@ export interface IVisionChatModal {
     configuredModel: string
     multiModalOption: IMultiModalOption
     configuredMaxToken?: number
-    setVisionModel(): void
-    revertToOriginalModel(): void
     setMultiModalOption(multiModalOption: IMultiModalOption): void
+}
+
+export interface IStateWithMessages extends ICommonObject {
+    messages: BaseMessage[]
+    [key: string]: any
+}
+
+export * from './Interface.Evaluation'
+
+export interface IServerSideEventStreamer {
+    streamStartEvent(chatId: string, data: any): void
+    streamTokenEvent(chatId: string, data: string): void
+    streamThinkingEvent(chatId: string, data: string, duration?: number): void
+    streamCustomEvent(chatId: string, eventType: string, data: any): void
+    streamSourceDocumentsEvent(chatId: string, data: any): void
+    streamUsedToolsEvent(chatId: string, data: any): void
+    streamCalledToolsEvent(chatId: string, data: any): void
+    streamFileAnnotationsEvent(chatId: string, data: any): void
+    streamToolEvent(chatId: string, data: any): void
+    streamAgentReasoningEvent(chatId: string, data: any): void
+    streamAgentFlowExecutedDataEvent(chatId: string, data: any): void
+    streamAgentFlowEvent(chatId: string, data: any): void
+    streamNextAgentEvent(chatId: string, data: any): void
+    streamNextAgentFlowEvent(chatId: string, data: any): void
+    streamActionEvent(chatId: string, data: any): void
+    streamArtifactsEvent(chatId: string, data: any): void
+    streamAbortEvent(chatId: string): void
+    streamEndEvent(chatId: string): void
+    streamUsageMetadataEvent(chatId: string, data: any): void
+    streamTTSStartEvent(chatId: string, chatMessageId: string, format: string): void
+    streamTTSDataEvent(chatId: string, chatMessageId: string, audioChunk: string): void
+    streamTTSEndEvent(chatId: string, chatMessageId: string): void
+}
+
+export enum FollowUpPromptProvider {
+    ANTHROPIC = 'chatAnthropic',
+    AZURE_OPENAI = 'azureChatOpenAI',
+    GOOGLE_GENAI = 'chatGoogleGenerativeAI',
+    MISTRALAI = 'chatMistralAI',
+    OPENAI = 'chatOpenAI',
+    GROQ = 'groqChat',
+    OLLAMA = 'ollama'
+}
+
+export type FollowUpPromptProviderConfig = {
+    [_key in FollowUpPromptProvider]: {
+        credentialId: string
+        modelName: string
+        baseUrl: string
+        prompt: string
+        temperature: string
+    }
+}
+
+export type FollowUpPromptConfig = {
+    status: boolean
+    selectedProvider: FollowUpPromptProvider
+} & FollowUpPromptProviderConfig
+
+export interface ICondition {
+    type: string
+    value1: CommonType
+    operation: string
+    value2: CommonType
+    isFulfilled?: boolean
+}
+
+export interface IHumanInput {
+    type: 'proceed' | 'reject'
+    startNodeId: string
+    feedback?: string
 }

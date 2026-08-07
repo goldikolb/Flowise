@@ -1,6 +1,16 @@
-import { FlowiseMemory, ICommonObject, IMessage, INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
-import { BaseNode, Metadata, BaseRetriever, LLM, ContextChatEngine, ChatMessage } from 'llamaindex'
+import {
+    FlowiseMemory,
+    ICommonObject,
+    IMessage,
+    INode,
+    INodeData,
+    INodeOutputsValue,
+    INodeParams,
+    IServerSideEventStreamer
+} from '../../../src/Interface'
+import { Metadata, BaseRetriever, LLM, ContextChatEngine, ChatMessage, NodeWithScore } from 'llamaindex'
 import { reformatSourceDocuments } from '../EngineUtils'
+import { EvaluationRunTracerLlama } from '../../../evaluation/EvaluationRunTracerLlama'
 
 class ContextChatEngine_LlamaIndex implements INode {
     label: string
@@ -15,6 +25,8 @@ class ContextChatEngine_LlamaIndex implements INode {
     inputs: INodeParams[]
     outputs: INodeOutputsValue[]
     sessionId?: string
+    badge: string
+    deprecateMessage: string
 
     constructor(fields?: { sessionId?: string }) {
         this.label = 'Context Chat Engine'
@@ -26,6 +38,8 @@ class ContextChatEngine_LlamaIndex implements INode {
         this.description = 'Answer question based on retrieved documents (context) with built-in memory to remember conversation'
         this.baseClasses = [this.type]
         this.tags = ['LlamaIndex']
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage = 'LlamaIndex integration is deprecated and will be removed in a future release.'
         this.inputs = [
             {
                 label: 'Chat Model',
@@ -71,6 +85,7 @@ class ContextChatEngine_LlamaIndex implements INode {
         const systemMessagePrompt = nodeData.inputs?.systemMessagePrompt as string
         const memory = nodeData.inputs?.memory as FlowiseMemory
         const returnSourceDocuments = nodeData.inputs?.returnSourceDocuments as boolean
+        const prependMessages = options?.prependMessages
 
         const chatHistory = [] as ChatMessage[]
 
@@ -83,7 +98,10 @@ class ContextChatEngine_LlamaIndex implements INode {
 
         const chatEngine = new ContextChatEngine({ chatModel: model, retriever: vectorStoreRetriever })
 
-        const msgs = (await memory.getChatMessages(this.sessionId, false, options.chatHistory)) as IMessage[]
+        // these are needed for evaluation runs
+        await EvaluationRunTracerLlama.injectEvaluationMetadata(nodeData, options, chatEngine)
+
+        const msgs = (await memory.getChatMessages(this.sessionId, false, prependMessages)) as IMessage[]
         for (const message of msgs) {
             if (message.type === 'apiMessage') {
                 chatHistory.push({
@@ -101,25 +119,34 @@ class ContextChatEngine_LlamaIndex implements INode {
         let text = ''
         let isStreamingStarted = false
         let sourceDocuments: ICommonObject[] = []
-        let sourceNodes: BaseNode<Metadata>[] = []
-        const isStreamingEnabled = options.socketIO && options.socketIOClientId
+        let sourceNodes: NodeWithScore<Metadata>[] = []
 
-        if (isStreamingEnabled) {
+        const shouldStreamResponse = options.shouldStreamResponse
+        const sseStreamer: IServerSideEventStreamer = options.sseStreamer as IServerSideEventStreamer
+        const chatId = options.chatId
+
+        if (shouldStreamResponse) {
             const stream = await chatEngine.chat({ message: input, chatHistory, stream: true })
             for await (const chunk of stream) {
                 text += chunk.response
                 if (chunk.sourceNodes) sourceNodes = chunk.sourceNodes
                 if (!isStreamingStarted) {
                     isStreamingStarted = true
-                    options.socketIO.to(options.socketIOClientId).emit('start', chunk.response)
+                    if (sseStreamer) {
+                        sseStreamer.streamStartEvent(chatId, chunk.response)
+                    }
                 }
 
-                options.socketIO.to(options.socketIOClientId).emit('token', chunk.response)
+                if (sseStreamer) {
+                    sseStreamer.streamTokenEvent(chatId, chunk.response)
+                }
             }
 
             if (returnSourceDocuments) {
                 sourceDocuments = reformatSourceDocuments(sourceNodes)
-                options.socketIO.to(options.socketIOClientId).emit('sourceDocuments', sourceDocuments)
+                if (sseStreamer) {
+                    sseStreamer.streamSourceDocumentsEvent(chatId, sourceDocuments)
+                }
             }
         } else {
             const response = await chatEngine.chat({ message: input, chatHistory })

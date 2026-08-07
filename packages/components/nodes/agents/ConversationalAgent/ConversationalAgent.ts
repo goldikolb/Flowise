@@ -1,4 +1,5 @@
 import { flatten } from 'lodash'
+import type { BaseLanguageModel } from '@langchain/core/language_models/base'
 import { Tool } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage, BaseMessage, HumanMessage } from '@langchain/core/messages'
@@ -6,13 +7,13 @@ import { ChainValues } from '@langchain/core/utils/types'
 import { AgentStep } from '@langchain/core/agents'
 import { renderTemplate, MessagesPlaceholder, HumanMessagePromptTemplate, PromptTemplate } from '@langchain/core/prompts'
 import { RunnableSequence } from '@langchain/core/runnables'
-import { ChatConversationalAgent } from 'langchain/agents'
-import { getBaseClasses } from '../../../src/utils'
+import { ChatConversationalAgent } from '@langchain/classic/agents'
+import { getBaseClasses, transformBracesWithColon } from '../../../src/utils'
 import { ConsoleCallbackHandler, CustomChainHandler, additionalCallbacks } from '../../../src/handler'
-import { IVisionChatModal, FlowiseMemory, ICommonObject, IMessage, INode, INodeData, INodeParams, IUsedTool } from '../../../src/Interface'
+import { FlowiseMemory, ICommonObject, INode, INodeData, INodeParams, IUsedTool, IServerSideEventStreamer } from '../../../src/Interface'
 import { AgentExecutor } from '../../../src/agents'
 import { addImagesToMessages, llmSupportsVision } from '../../../src/multiModalUtils'
-import { checkInputs, Moderation } from '../../moderation/Moderation'
+import { checkInputs, Moderation, streamResponse } from '../../moderation/Moderation'
 import { formatResponse } from '../../outputparsers/OutputParserHelpers'
 
 const DEFAULT_PREFIX = `Assistant is a large language model trained by OpenAI.
@@ -43,6 +44,8 @@ class ConversationalAgent_Agents implements INode {
     baseClasses: string[]
     inputs: INodeParams[]
     sessionId?: string
+    deprecateMessage: string
+    badge: string
 
     constructor(fields?: { sessionId?: string }) {
         this.label = 'Conversational Agent'
@@ -52,6 +55,9 @@ class ConversationalAgent_Agents implements INode {
         this.category = 'Agents'
         this.icon = 'agent.svg'
         this.description = 'Conversational agent for a chat model. It will utilize chat specific prompts'
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage =
+            'Conversational agent is deprecated and will be removed in a future release. Use Agent from AgentFlow instead.'
         this.baseClasses = [this.type, ...getBaseClasses(AgentExecutor)]
         this.inputs = [
             {
@@ -86,53 +92,76 @@ class ConversationalAgent_Agents implements INode {
                 type: 'Moderation',
                 optional: true,
                 list: true
+            },
+            {
+                label: 'Max Iterations',
+                name: 'maxIterations',
+                type: 'number',
+                optional: true,
+                additionalParams: true
             }
         ]
         this.sessionId = fields?.sessionId
     }
 
     async init(nodeData: INodeData, input: string, options: ICommonObject): Promise<any> {
-        return prepareAgent(nodeData, options, { sessionId: this.sessionId, chatId: options.chatId, input }, options.chatHistory)
+        return prepareAgent(nodeData, options, { sessionId: this.sessionId, chatId: options.chatId, input })
     }
 
     async run(nodeData: INodeData, input: string, options: ICommonObject): Promise<string | object> {
         const memory = nodeData.inputs?.memory as FlowiseMemory
         const moderations = nodeData.inputs?.inputModeration as Moderation[]
 
+        const shouldStreamResponse = options.shouldStreamResponse
+        const sseStreamer: IServerSideEventStreamer = options.sseStreamer as IServerSideEventStreamer
+        const chatId = options.chatId
         if (moderations && moderations.length > 0) {
             try {
                 // Use the output of the moderation chain as input for the BabyAGI agent
                 input = await checkInputs(moderations, input)
             } catch (e) {
                 await new Promise((resolve) => setTimeout(resolve, 500))
-                //streamResponse(options.socketIO && options.socketIOClientId, e.message, options.socketIO, options.socketIOClientId)
+                if (options.shouldStreamResponse) {
+                    streamResponse(sseStreamer, chatId, e.message)
+                }
                 return formatResponse(e.message)
             }
         }
-        const executor = await prepareAgent(
-            nodeData,
-            options,
-            { sessionId: this.sessionId, chatId: options.chatId, input },
-            options.chatHistory
-        )
+        const executor = await prepareAgent(nodeData, options, { sessionId: this.sessionId, chatId: options.chatId, input })
 
-        const loggerHandler = new ConsoleCallbackHandler(options.logger)
+        const loggerHandler = new ConsoleCallbackHandler(options.logger, options?.orgId)
         const callbacks = await additionalCallbacks(nodeData, options)
 
         let res: ChainValues = {}
         let sourceDocuments: ICommonObject[] = []
         let usedTools: IUsedTool[] = []
 
-        if (options.socketIO && options.socketIOClientId) {
-            const handler = new CustomChainHandler(options.socketIO, options.socketIOClientId)
+        if (options.shouldStreamResponse) {
+            const handler = new CustomChainHandler(shouldStreamResponse ? sseStreamer : undefined, chatId)
             res = await executor.invoke({ input }, { callbacks: [loggerHandler, handler, ...callbacks] })
             if (res.sourceDocuments) {
-                options.socketIO.to(options.socketIOClientId).emit('sourceDocuments', flatten(res.sourceDocuments))
+                if (options.sseStreamer) {
+                    sseStreamer.streamSourceDocumentsEvent(options.chatId, flatten(res.sourceDocuments))
+                }
                 sourceDocuments = res.sourceDocuments
             }
             if (res.usedTools) {
-                options.socketIO.to(options.socketIOClientId).emit('usedTools', res.usedTools)
+                sseStreamer.streamUsedToolsEvent(options.chatId, res.usedTools)
                 usedTools = res.usedTools
+            }
+            // If the tool is set to returnDirect, stream the output to the client
+            if (res.usedTools && res.usedTools.length) {
+                let inputTools = nodeData.inputs?.tools
+                inputTools = flatten(inputTools)
+                for (const tool of res.usedTools) {
+                    const inputTool = inputTools.find((inputTool: Tool) => inputTool.name === tool.tool)
+                    if (inputTool && inputTool.returnDirect && options.sseStreamer) {
+                        sseStreamer.streamTokenEvent(options.chatId, tool.toolOutput)
+                    }
+                }
+            }
+            if (sseStreamer) {
+                sseStreamer.streamEndEvent(options.chatId)
             }
         } else {
             res = await executor.invoke({ input }, { callbacks: [loggerHandler, ...callbacks] })
@@ -178,21 +207,24 @@ class ConversationalAgent_Agents implements INode {
 const prepareAgent = async (
     nodeData: INodeData,
     options: ICommonObject,
-    flowObj: { sessionId?: string; chatId?: string; input?: string },
-    chatHistory: IMessage[] = []
+    flowObj: { sessionId?: string; chatId?: string; input?: string }
 ) => {
     const model = nodeData.inputs?.model as BaseChatModel
+    const maxIterations = nodeData.inputs?.maxIterations as string
     let tools = nodeData.inputs?.tools as Tool[]
     tools = flatten(tools)
     const memory = nodeData.inputs?.memory as FlowiseMemory
-    const systemMessage = nodeData.inputs?.systemMessage as string
+    let systemMessage = nodeData.inputs?.systemMessage as string
     const memoryKey = memory.memoryKey ? memory.memoryKey : 'chat_history'
     const inputKey = memory.inputKey ? memory.inputKey : 'input'
+    const prependMessages = options?.prependMessages
 
     const outputParser = ChatConversationalAgent.getDefaultOutputParser({
         llm: model,
         toolNames: tools.map((tool) => tool.name)
     })
+
+    systemMessage = transformBracesWithColon(systemMessage)
 
     const prompt = ChatConversationalAgent.createPrompt(tools, {
         systemMessage: systemMessage ? systemMessage : DEFAULT_PREFIX,
@@ -200,12 +232,9 @@ const prepareAgent = async (
     })
 
     if (llmSupportsVision(model)) {
-        const visionChatModel = model as IVisionChatModal
-        const messageContent = addImagesToMessages(nodeData, options, model.multiModalOption)
+        const messageContent = await addImagesToMessages(nodeData, options, model.multiModalOption)
 
         if (messageContent?.length) {
-            visionChatModel.setVisionModel()
-
             // Pop the `agent_scratchpad` MessagePlaceHolder
             let messagePlaceholder = prompt.promptMessages.pop() as MessagesPlaceholder
             if (prompt.promptMessages.at(-1) instanceof HumanMessagePromptTemplate) {
@@ -223,13 +252,11 @@ const prepareAgent = async (
 
             // Add the `agent_scratchpad` MessagePlaceHolder back
             prompt.promptMessages.push(messagePlaceholder)
-        } else {
-            visionChatModel.revertToOriginalModel()
         }
     }
 
     /** Bind a stop token to the model */
-    const modelWithStop = model.bind({
+    const modelWithStop = (model as BaseLanguageModel).withConfig({
         stop: ['\nObservation']
     })
 
@@ -238,7 +265,7 @@ const prepareAgent = async (
             [inputKey]: (i: { input: string; steps: AgentStep[] }) => i.input,
             agent_scratchpad: async (i: { input: string; steps: AgentStep[] }) => await constructScratchPad(i.steps),
             [memoryKey]: async (_: { input: string; steps: AgentStep[] }) => {
-                const messages = (await memory.getChatMessages(flowObj?.sessionId, true, chatHistory)) as BaseMessage[]
+                const messages = (await memory.getChatMessages(flowObj?.sessionId, true, prependMessages)) as BaseMessage[]
                 return messages ?? []
             }
         },
@@ -253,7 +280,8 @@ const prepareAgent = async (
         sessionId: flowObj?.sessionId,
         chatId: flowObj?.chatId,
         input: flowObj?.input,
-        verbose: process.env.DEBUG === 'true'
+        verbose: process.env.DEBUG === 'true',
+        maxIterations: maxIterations ? parseFloat(maxIterations) : undefined
     })
 
     return executor

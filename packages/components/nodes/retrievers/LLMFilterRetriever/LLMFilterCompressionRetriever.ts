@@ -1,7 +1,7 @@
 import { BaseRetriever } from '@langchain/core/retrievers'
 import { BaseLanguageModel } from '@langchain/core/language_models/base'
-import { ContextualCompressionRetriever } from 'langchain/retrievers/contextual_compression'
-import { LLMChainExtractor } from 'langchain/retrievers/document_compressors/chain_extract'
+import { ContextualCompressionRetriever } from '@langchain/classic/retrievers/contextual_compression'
+import { LLMChainExtractor } from '@langchain/classic/retrievers/document_compressors/chain_extract'
 import { handleEscapeCharacters } from '../../../src/utils'
 import { INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
 
@@ -25,7 +25,6 @@ class LLMFilterCompressionRetriever_Retrievers implements INode {
         this.type = 'LLMFilterRetriever'
         this.icon = 'llmFilterRetriever.svg'
         this.category = 'Retrievers'
-        this.badge = 'NEW'
         this.description =
             'Iterate over the initially returned documents and extract, from each, only the content that is relevant to the query'
         this.baseClasses = [this.type, 'BaseRetriever']
@@ -84,11 +83,11 @@ class LLMFilterCompressionRetriever_Retrievers implements INode {
         })
 
         if (output === 'retriever') return retriever
-        else if (output === 'document') return await retriever.getRelevantDocuments(query ? query : input)
+        else if (output === 'document') return await retriever._getRelevantDocuments(query ? query : input)
         else if (output === 'text') {
             let finaltext = ''
 
-            const docs = await retriever.getRelevantDocuments(query ? query : input)
+            const docs = await retriever._getRelevantDocuments(query ? query : input)
 
             for (const doc of docs) finaltext += `${doc.pageContent}\n`
 

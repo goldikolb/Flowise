@@ -1,7 +1,27 @@
-import { GoogleAuthOptions } from 'google-auth-library'
-import { GoogleVertexAIEmbeddings, GoogleVertexAIEmbeddingsParams } from '@langchain/community/embeddings/googlevertexai'
-import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
-import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
+import { GoogleVertexAIEmbeddingsInput, VertexAIEmbeddings } from '@langchain/google-vertexai'
+import { buildGoogleCredentials } from '../../../src/google-utils'
+import { ICommonObject, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
+import { MODEL_TYPE, getModels, getRegions } from '../../../src/modelLoader'
+import { getBaseClasses } from '../../../src/utils'
+
+class VertexAIEmbeddingsWithStripNewLines extends VertexAIEmbeddings {
+    stripNewLines: boolean
+
+    constructor(params: GoogleVertexAIEmbeddingsInput & { stripNewLines?: boolean }) {
+        super(params)
+        this.stripNewLines = params.stripNewLines ?? false
+    }
+
+    async embedDocuments(texts: string[]): Promise<number[][]> {
+        const processedTexts = this.stripNewLines ? texts.map((text) => text.replace(/\n/g, ' ')) : texts
+        return super.embedDocuments(processedTexts)
+    }
+
+    async embedQuery(text: string): Promise<number[]> {
+        const processedText = this.stripNewLines ? text.replace(/\n/g, ' ') : text
+        return super.embedQuery(processedText)
+    }
+}
 
 class GoogleVertexAIEmbedding_Embeddings implements INode {
     label: string
@@ -16,14 +36,14 @@ class GoogleVertexAIEmbedding_Embeddings implements INode {
     inputs: INodeParams[]
 
     constructor() {
-        this.label = 'GoogleVertexAI Embeddings'
+        this.label = 'Google VertexAI Embedding'
         this.name = 'googlevertexaiEmbeddings'
-        this.version = 1.0
+        this.version = 2.1
         this.type = 'GoogleVertexAIEmbeddings'
         this.icon = 'GoogleVertex.svg'
         this.category = 'Embeddings'
         this.description = 'Google vertexAI API to generate embeddings for a given text'
-        this.baseClasses = [this.type, ...getBaseClasses(GoogleVertexAIEmbeddings)]
+        this.baseClasses = [this.type, ...getBaseClasses(VertexAIEmbeddingsWithStripNewLines)]
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -37,55 +57,55 @@ class GoogleVertexAIEmbedding_Embeddings implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'textembedding-gecko@001',
-                        name: 'textembedding-gecko@001'
-                    },
-                    {
-                        label: 'textembedding-gecko@latest',
-                        name: 'textembedding-gecko@latest'
-                    },
-                    {
-                        label: 'textembedding-gecko-multilingual@latest',
-                        name: 'textembedding-gecko-multilingual@latest'
-                    }
-                ],
-                default: 'textembedding-gecko@001',
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
+                default: 'text-embedding-004'
+            },
+            {
+                label: 'Region',
+                description: 'Region to use for the model.',
+                name: 'region',
+                type: 'asyncOptions',
+                loadMethod: 'listRegions',
                 optional: true
+            },
+            {
+                label: 'Strip New Lines',
+                name: 'stripNewLines',
+                type: 'boolean',
+                optional: true,
+                additionalParams: true,
+                description: 'Remove new lines from input text before embedding to reduce token count'
             }
         ]
     }
 
-    async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
-        const credentialData = await getCredentialData(nodeData.credential ?? '', options)
-        const modelName = nodeData.inputs?.modelName as string
-        const googleApplicationCredentialFilePath = getCredentialParam('googleApplicationCredentialFilePath', credentialData, nodeData)
-        const googleApplicationCredential = getCredentialParam('googleApplicationCredential', credentialData, nodeData)
-        const projectID = getCredentialParam('projectID', credentialData, nodeData)
-
-        const authOptions: GoogleAuthOptions = {}
-        if (Object.keys(credentialData).length !== 0) {
-            if (!googleApplicationCredentialFilePath && !googleApplicationCredential)
-                throw new Error('Please specify your Google Application Credential')
-            if (!googleApplicationCredentialFilePath && !googleApplicationCredential)
-                throw new Error(
-                    'Error: More than one component has been inputted. Please use only one of the following: Google Application Credential File Path or Google Credential JSON Object'
-                )
-
-            if (googleApplicationCredentialFilePath && !googleApplicationCredential)
-                authOptions.keyFile = googleApplicationCredentialFilePath
-            else if (!googleApplicationCredentialFilePath && googleApplicationCredential)
-                authOptions.credentials = JSON.parse(googleApplicationCredential)
-
-            if (projectID) authOptions.projectId = projectID
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.EMBEDDING, 'googlevertexaiEmbeddings')
+        },
+        async listRegions(): Promise<INodeOptionsValue[]> {
+            return await getRegions(MODEL_TYPE.EMBEDDING, 'googlevertexaiEmbeddings')
         }
-        const obj: GoogleVertexAIEmbeddingsParams = {}
-        if (modelName) obj.model = modelName
-        if (Object.keys(authOptions).length !== 0) obj.authOptions = authOptions
+    }
 
-        const model = new GoogleVertexAIEmbeddings(obj)
+    async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
+        const modelName = nodeData.inputs?.modelName as string
+        const region = nodeData.inputs?.region as string
+        const stripNewLines = nodeData.inputs?.stripNewLines as boolean
+
+        const obj: GoogleVertexAIEmbeddingsInput & { stripNewLines?: boolean } = {
+            model: modelName,
+            stripNewLines
+        }
+
+        const authOptions = await buildGoogleCredentials(nodeData, options)
+        if (authOptions && Object.keys(authOptions).length !== 0) obj.authOptions = authOptions
+
+        if (region) obj.location = region
+
+        const model = new VertexAIEmbeddingsWithStripNewLines(obj)
         return model
     }
 }

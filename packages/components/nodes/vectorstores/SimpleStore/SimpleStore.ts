@@ -1,9 +1,8 @@
-import path from 'path'
 import { flatten } from 'lodash'
 import { storageContextFromDefaults, serviceContextFromDefaults, VectorStoreIndex, Document } from 'llamaindex'
-import { Document as LCDocument } from 'langchain/document'
-import { INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
-import { getUserHome } from '../../../src'
+import { Document as LCDocument } from '@langchain/core/documents'
+import { INode, INodeData, INodeOutputsValue, INodeParams, IndexingResult } from '../../../src/Interface'
+import { validateVectorStorePath } from '../../../src/validator'
 
 class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
     label: string
@@ -17,6 +16,8 @@ class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
     tags: string[]
     inputs: INodeParams[]
     outputs: INodeOutputsValue[]
+    badge: string
+    deprecateMessage: string
 
     constructor() {
         this.label = 'SimpleStore'
@@ -28,6 +29,8 @@ class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
         this.description = 'Upsert embedded data to local path and perform similarity search'
         this.baseClasses = [this.type, 'VectorIndexRetriever']
         this.tags = ['LlamaIndex']
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage = 'LlamaIndex integration is deprecated and will be removed in a future release.'
         this.inputs = [
             {
                 label: 'Document',
@@ -79,15 +82,11 @@ class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
 
     //@ts-ignore
     vectorStoreMethods = {
-        async upsert(nodeData: INodeData): Promise<void> {
+        async upsert(nodeData: INodeData): Promise<Partial<IndexingResult>> {
             const basePath = nodeData.inputs?.basePath as string
             const docs = nodeData.inputs?.document as LCDocument[]
             const embeddings = nodeData.inputs?.embeddings
             const model = nodeData.inputs?.model
-
-            let filePath = ''
-            if (!basePath) filePath = path.join(getUserHome(), '.flowise', 'llamaindex')
-            else filePath = basePath
 
             const flattenDocs = docs && docs.length ? flatten(docs) : []
             const finalDocs = []
@@ -101,10 +100,13 @@ class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
             }
 
             const serviceContext = serviceContextFromDefaults({ llm: model, embedModel: embeddings })
+            // Validate and sanitize the base path to prevent path traversal attacks
+            const filePath = validateVectorStorePath(basePath)
             const storageContext = await storageContextFromDefaults({ persistDir: filePath })
 
             try {
                 await VectorStoreIndex.fromDocuments(llamadocs, { serviceContext, storageContext })
+                return { numAdded: finalDocs.length, addedDocs: finalDocs }
             } catch (e) {
                 throw new Error(e)
             }
@@ -118,9 +120,8 @@ class SimpleStoreUpsert_LlamaIndex_VectorStores implements INode {
         const topK = nodeData.inputs?.topK as string
         const k = topK ? parseFloat(topK) : 4
 
-        let filePath = ''
-        if (!basePath) filePath = path.join(getUserHome(), '.flowise', 'llamaindex')
-        else filePath = basePath
+        // Validate and sanitize the base path to prevent path traversal attacks
+        const filePath = validateVectorStorePath(basePath)
 
         const serviceContext = serviceContextFromDefaults({ llm: model, embedModel: embeddings })
         const storageContext = await storageContextFromDefaults({ persistDir: filePath })

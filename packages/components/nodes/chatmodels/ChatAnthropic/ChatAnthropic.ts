@@ -1,9 +1,11 @@
 import { AnthropicInput, ChatAnthropic as LangchainChatAnthropic } from '@langchain/anthropic'
 import { BaseCache } from '@langchain/core/caches'
 import { BaseLLMParams } from '@langchain/core/language_models/llms'
-import { ICommonObject, IMultiModalOption, INode, INodeData, INodeParams } from '../../../src/Interface'
+import { ICommonObject, IMultiModalOption, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
 import { ChatAnthropic } from './FlowiseChatAnthropic'
+import { getModels, MODEL_TYPE } from '../../../src/modelLoader'
+import { supportsSamplingParams } from '../../../src/anthropicUtils'
 
 class ChatAnthropic_ChatModels implements INode {
     label: string
@@ -18,9 +20,9 @@ class ChatAnthropic_ChatModels implements INode {
     inputs: INodeParams[]
 
     constructor() {
-        this.label = 'ChatAnthropic'
+        this.label = 'Anthropic Claude'
         this.name = 'chatAnthropic'
-        this.version = 5.0
+        this.version = 8.0
         this.type = 'ChatAnthropic'
         this.icon = 'Anthropic.svg'
         this.category = 'Chat Models'
@@ -42,41 +44,9 @@ class ChatAnthropic_ChatModels implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'claude-3-haiku',
-                        name: 'claude-3-haiku-20240307',
-                        description: 'Fastest and most compact model, designed for near-instant responsiveness'
-                    },
-                    {
-                        label: 'claude-3-opus',
-                        name: 'claude-3-opus-20240229',
-                        description: 'Most powerful model for highly complex tasks'
-                    },
-                    {
-                        label: 'claude-3-sonnet',
-                        name: 'claude-3-sonnet-20240229',
-                        description: 'Ideal balance of intelligence and speed for enterprise workloads'
-                    },
-                    {
-                        label: 'claude-2.0 (legacy)',
-                        name: 'claude-2.0',
-                        description: 'Claude 2 latest major version, automatically get updates to the model as they are released'
-                    },
-                    {
-                        label: 'claude-2.1 (legacy)',
-                        name: 'claude-2.1',
-                        description: 'Claude 2 latest full version'
-                    },
-                    {
-                        label: 'claude-instant-1.2 (legacy)',
-                        name: 'claude-instant-1.2',
-                        description: 'Claude Instant latest major version, automatically get updates to the model as they are released'
-                    }
-                ],
-                default: 'claude-3-haiku',
-                optional: true
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
+                default: 'claude-haiku-4-5'
             },
             {
                 label: 'Temperature',
@@ -85,6 +55,95 @@ class ChatAnthropic_ChatModels implements INode {
                 step: 0.1,
                 default: 0.9,
                 optional: true
+            },
+            {
+                label: 'Streaming',
+                name: 'streaming',
+                type: 'boolean',
+                default: true,
+                optional: true,
+                additionalParams: true
+            },
+            {
+                label: 'Allow Image Uploads',
+                name: 'allowImageUploads',
+                type: 'boolean',
+                description:
+                    'Allow image input. Refer to the <a href="https://docs.flowiseai.com/using-flowise/uploads#image" target="_blank">docs</a> for more details.',
+                default: false,
+                optional: true
+            },
+            /*  The manual thinking: {type: "enabled", budget_tokens: N} configuration is deprecated on Opus 4.6 and will be removed in a future model release */
+            {
+                label: 'Extended Thinking',
+                name: 'extendedThinking',
+                type: 'boolean',
+                description: 'Enable extended thinking for reasoning model such as Claude Sonnet 3.7 and Claude 4',
+                optional: true,
+                additionalParams: true,
+                hide: {
+                    modelName: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6']
+                }
+            },
+            {
+                label: 'Budget Tokens',
+                name: 'budgetTokens',
+                type: 'number',
+                step: 1,
+                default: '1024',
+                description: 'Maximum number of tokens Claude is allowed use for its internal reasoning process',
+                optional: true,
+                additionalParams: true,
+                show: {
+                    extendedThinking: true
+                },
+                hide: {
+                    modelName: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6']
+                }
+            },
+            {
+                label: 'Adaptive Thinking',
+                description:
+                    'Claude evaluates the complexity of each request and determines whether and how much to use extended thinking.',
+                name: 'adaptiveThinking',
+                type: 'boolean',
+                default: false,
+                optional: true,
+                additionalParams: true,
+                show: {
+                    modelName: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6']
+                }
+            },
+            {
+                label: 'Thinking Effort',
+                description: 'Control how eager Claude is about spending tokens when responding to requests',
+                name: 'thinkingEffort',
+                type: 'options',
+                optional: true,
+                options: [
+                    {
+                        label: 'Low',
+                        name: 'low'
+                    },
+                    {
+                        label: 'Medium',
+                        name: 'medium'
+                    },
+                    {
+                        label: 'High',
+                        name: 'high'
+                    },
+                    {
+                        label: 'Max',
+                        name: 'max',
+                        description: 'Absolute maximum capability with no constraints on token spending. Opus 4.6 and newer only'
+                    }
+                ],
+                additionalParams: true,
+                show: {
+                    adaptiveThinking: true,
+                    modelName: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6']
+                }
             },
             {
                 label: 'Max Tokens',
@@ -109,17 +168,15 @@ class ChatAnthropic_ChatModels implements INode {
                 step: 0.1,
                 optional: true,
                 additionalParams: true
-            },
-            {
-                label: 'Allow Image Uploads',
-                name: 'allowImageUploads',
-                type: 'boolean',
-                description:
-                    'Automatically uses claude-3-* models when image is being uploaded from chat. Only works with LLMChain, Conversation Chain, ReAct Agent, and Conversational Agent',
-                default: false,
-                optional: true
             }
         ]
+    }
+
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.CHAT, 'chatAnthropic')
+        }
     }
 
     async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
@@ -130,23 +187,51 @@ class ChatAnthropic_ChatModels implements INode {
         const topK = nodeData.inputs?.topK as string
         const streaming = nodeData.inputs?.streaming as boolean
         const cache = nodeData.inputs?.cache as BaseCache
+        const extendedThinking = nodeData.inputs?.extendedThinking as boolean
+        const budgetTokens = nodeData.inputs?.budgetTokens as string
+        const adaptiveThinking = nodeData.inputs?.adaptiveThinking as boolean
+        const thinkingEffort = nodeData.inputs?.thinkingEffort as 'low' | 'medium' | 'high' | 'max'
 
         const credentialData = await getCredentialData(nodeData.credential ?? '', options)
         const anthropicApiKey = getCredentialParam('anthropicApiKey', credentialData, nodeData)
 
         const allowImageUploads = nodeData.inputs?.allowImageUploads as boolean
 
+        const samplingSupported = supportsSamplingParams(modelName)
+        const thinkingEnabled = adaptiveThinking || extendedThinking
+
         const obj: Partial<AnthropicInput> & BaseLLMParams & { anthropicApiKey?: string } = {
-            temperature: parseFloat(temperature),
             modelName,
             anthropicApiKey,
             streaming: streaming ?? true
         }
 
+        // Temperature is incompatible with thinking modes and with models that
+        // don't support sampling parameters.
+        if (samplingSupported && !thinkingEnabled) {
+            obj.temperature = parseFloat(temperature)
+        }
+
         if (maxTokens) obj.maxTokens = parseInt(maxTokens, 10)
-        if (topP) obj.topP = parseFloat(topP)
-        if (topK) obj.topK = parseFloat(topK)
+        if (samplingSupported && topP) obj.topP = parseFloat(topP)
+        if (samplingSupported && topK) obj.topK = parseFloat(topK)
         if (cache) obj.cache = cache
+
+        if (adaptiveThinking) {
+            obj.thinking = {
+                type: 'adaptive'
+            }
+            if (thinkingEffort) {
+                obj.outputConfig = {
+                    effort: thinkingEffort
+                }
+            }
+        } else if (extendedThinking) {
+            obj.thinking = {
+                type: 'enabled',
+                budget_tokens: parseInt(budgetTokens ?? '1024', 10)
+            }
+        }
 
         const multiModalOption: IMultiModalOption = {
             image: {

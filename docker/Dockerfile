@@ -1,21 +1,40 @@
-FROM node:18-alpine
+# Node.js version (overridable via build-arg from CI)
+ARG NODE_VERSION=24
+
+# Stage 1: Build stage
+FROM node:${NODE_VERSION}-alpine AS build
 
 USER root
 
-RUN apk add --no-cache git
-RUN apk add --no-cache python3 py3-pip make g++
-# needed for pdfjs-dist
-RUN apk add --no-cache build-base cairo-dev pango-dev
+# Install build dependencies
+RUN apk add --no-cache git python3 py3-pip make g++ build-base cairo-dev pango-dev
 
-# Install Chromium
-RUN apk add --no-cache chromium
-
+# Skip downloading Chrome for Puppeteer (saves build time)
 ENV PUPPETEER_SKIP_DOWNLOAD=true
+
+# Install latest Flowise globally (specific version can be set: flowise@1.0.0)
+# npm dedupe is required after install: npm's overrides resolver does not
+# consistently collapse every duplicate of an overridden package in one pass
+# on a tree this size/complexity
+RUN npm install -g flowise && npm --prefix "$(npm root -g)/flowise" dedupe
+
+# Stage 2: Runtime stage
+FROM node:${NODE_VERSION}-alpine
+
+# Install runtime dependencies
+RUN apk add --no-cache chromium git python3 py3-pip make g++ build-base cairo-dev pango-dev curl
+
+# Set the environment variable for Puppeteer to find Chromium
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-# You can install a specific version like: flowise@1.0.0
-RUN npm install -g flowise
+# Copy Flowise from the build stage
+COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=build /usr/local/bin /usr/local/bin
 
-WORKDIR /data
+# Give the node user ownership of the installed package (node:*-alpine already has this user)
+RUN chown -R node:node /usr/local/lib/node_modules /usr/local/bin
 
-CMD "flowise"
+# Switch to non-root user
+USER node
+
+ENTRYPOINT ["flowise", "start"]

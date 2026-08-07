@@ -15,8 +15,9 @@ import {
     ListItemAvatar,
     ListItemText
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { IconX } from '@tabler/icons'
+import { IconX } from '@tabler/icons-react'
 
 // Project import
 import CredentialInputHandler from '@/views/canvas/CredentialInputHandler'
@@ -27,6 +28,10 @@ import { StyledButton } from '@/ui-component/button/StyledButton'
 import langsmithPNG from '@/assets/images/langchain.png'
 import langfuseSVG from '@/assets/images/langfuse.svg'
 import lunarySVG from '@/assets/images/lunary.svg'
+import langwatchSVG from '@/assets/images/langwatch.svg'
+import arizePNG from '@/assets/images/arize.png'
+import phoenixPNG from '@/assets/images/phoenix.png'
+import opikPNG from '@/assets/images/opik.png'
 
 // store
 import useNotifier from '@/utils/useNotifier'
@@ -109,11 +114,115 @@ const analyticProviders = [
                 optional: true
             }
         ]
+    },
+    {
+        label: 'LangWatch',
+        name: 'langWatch',
+        icon: langwatchSVG,
+        url: 'https://langwatch.ai',
+        inputs: [
+            {
+                label: 'Connect Credential',
+                name: 'credential',
+                type: 'credential',
+                credentialNames: ['langwatchApi']
+            },
+            {
+                label: 'On/Off',
+                name: 'status',
+                type: 'boolean',
+                optional: true
+            }
+        ]
+    },
+    {
+        label: 'Arize',
+        name: 'arize',
+        icon: arizePNG,
+        url: 'https://arize.com',
+        inputs: [
+            {
+                label: 'Connect Credential',
+                name: 'credential',
+                type: 'credential',
+                credentialNames: ['arizeApi']
+            },
+            {
+                label: 'Project Name',
+                name: 'projectName',
+                type: 'string',
+                optional: true,
+                description: 'If not provided, default will be used.',
+                placeholder: 'default'
+            },
+            {
+                label: 'On/Off',
+                name: 'status',
+                type: 'boolean',
+                optional: true
+            }
+        ]
+    },
+    {
+        label: 'Phoenix',
+        name: 'phoenix',
+        icon: phoenixPNG,
+        url: 'https://phoenix.arize.com',
+        inputs: [
+            {
+                label: 'Connect Credential',
+                name: 'credential',
+                type: 'credential',
+                credentialNames: ['phoenixApi']
+            },
+            {
+                label: 'Project Name',
+                name: 'projectName',
+                type: 'string',
+                optional: true,
+                description: 'If not provided, default will be used.',
+                placeholder: 'default'
+            },
+            {
+                label: 'On/Off',
+                name: 'status',
+                type: 'boolean',
+                optional: true
+            }
+        ]
+    },
+    {
+        label: 'Opik',
+        name: 'opik',
+        icon: opikPNG,
+        url: 'https://www.comet.com/opik',
+        inputs: [
+            {
+                label: 'Connect Credential',
+                name: 'credential',
+                type: 'credential',
+                credentialNames: ['opikApi']
+            },
+            {
+                label: 'Project Name',
+                name: 'opikProjectName',
+                type: 'string',
+                description: 'Name of your Opik project',
+                placeholder: 'default'
+            },
+            {
+                label: 'On/Off',
+                name: 'status',
+                type: 'boolean',
+                optional: true
+            }
+        ]
     }
 ]
 
 const AnalyseFlow = ({ dialogProps }) => {
     const dispatch = useDispatch()
+    const theme = useTheme()
 
     useNotifier()
 
@@ -144,9 +253,10 @@ const AnalyseFlow = ({ dialogProps }) => {
                 dispatch({ type: SET_CHATFLOW, chatflow: saveResp.data })
             }
         } catch (error) {
-            const errorData = error.response.data || `${error.response.status}: ${error.response.statusText}`
             enqueueSnackbar({
-                message: `Failed to save Analytic Configuration: ${errorData}`,
+                message: `Failed to save Analytic Configuration: ${
+                    typeof error.response.data === 'object' ? error.response.data.message : error.response.data
+                }`,
                 options: {
                     key: new Date().getTime() + Math.random(),
                     variant: 'error',
@@ -231,7 +341,12 @@ const AnalyseFlow = ({ dialogProps }) => {
                                 sx={{ ml: 1 }}
                                 primary={provider.label}
                                 secondary={
-                                    <a target='_blank' rel='noreferrer' href={provider.url}>
+                                    <a
+                                        target='_blank'
+                                        rel='noreferrer'
+                                        href={provider.url}
+                                        style={{ color: theme.palette.primary.main, opacity: 0.85 }}
+                                    >
                                         {provider.url}
                                     </a>
                                 }
@@ -308,9 +423,11 @@ const AnalyseFlow = ({ dialogProps }) => {
                     </AccordionDetails>
                 </Accordion>
             ))}
-            <StyledButton style={{ marginBottom: 10, marginTop: 10 }} variant='contained' onClick={onSave}>
-                Save
-            </StyledButton>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', width: '100%', mt: 2 }}>
+                <StyledButton variant='contained' onClick={onSave} sx={{ minWidth: 100 }}>
+                    Save
+                </StyledButton>
+            </Box>
         </>
     )
 }

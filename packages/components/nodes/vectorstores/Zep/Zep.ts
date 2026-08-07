@@ -3,8 +3,8 @@ import { IDocument, ZepClient } from '@getzep/zep-js'
 import { ZepVectorStore, IZepConfig } from '@langchain/community/vectorstores/zep'
 import { Embeddings } from '@langchain/core/embeddings'
 import { Document } from '@langchain/core/documents'
-import { ICommonObject, INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
-import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
+import { ICommonObject, INode, INodeData, INodeOutputsValue, INodeParams, IndexingResult } from '../../../src/Interface'
+import { getBaseClasses, getCredentialData, getCredentialParam, parseJsonBody } from '../../../src/utils'
 import { addMMRInputParams, resolveVectorStoreOrRetriever } from '../VectorStoreUtils'
 
 class Zep_VectorStores implements INode {
@@ -31,7 +31,6 @@ class Zep_VectorStores implements INode {
         this.description =
             'Upsert embedded data and perform similarity or mmr search upon query using Zep, a fast and scalable building block for LLM apps'
         this.baseClasses = [this.type, 'VectorStoreRetriever', 'BaseRetriever']
-        this.badge = 'NEW'
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -70,7 +69,8 @@ class Zep_VectorStores implements INode {
                 name: 'zepMetadataFilter',
                 type: 'json',
                 optional: true,
-                additionalParams: true
+                additionalParams: true,
+                acceptVariable: true
             },
             {
                 label: 'Embedding Dimension',
@@ -106,7 +106,7 @@ class Zep_VectorStores implements INode {
 
     //@ts-ignore
     vectorStoreMethods = {
-        async upsert(nodeData: INodeData, options: ICommonObject): Promise<void> {
+        async upsert(nodeData: INodeData, options: ICommonObject): Promise<Partial<IndexingResult>> {
             const baseURL = nodeData.inputs?.baseURL as string
             const zepCollection = nodeData.inputs?.zepCollection as string
             const dimension = (nodeData.inputs?.dimension as number) ?? 1536
@@ -134,6 +134,7 @@ class Zep_VectorStores implements INode {
 
             try {
                 await ZepVectorStore.fromDocuments(finalDocs, embeddings, zepConfig)
+                return { numAdded: finalDocs.length, addedDocs: finalDocs }
             } catch (e) {
                 throw new Error(e)
             }
@@ -158,13 +159,13 @@ class Zep_VectorStores implements INode {
         }
         if (apiKey) zepConfig.apiKey = apiKey
         if (zepMetadataFilter) {
-            const metadatafilter = typeof zepMetadataFilter === 'object' ? zepMetadataFilter : JSON.parse(zepMetadataFilter)
+            const metadatafilter = typeof zepMetadataFilter === 'object' ? zepMetadataFilter : parseJsonBody(zepMetadataFilter)
             zepConfig.filter = metadatafilter
         }
 
         const vectorStore = await ZepExistingVS.fromExistingIndex(embeddings, zepConfig)
 
-        return resolveVectorStoreOrRetriever(nodeData, vectorStore)
+        return resolveVectorStoreOrRetriever(nodeData, vectorStore, zepConfig.filter)
     }
 }
 

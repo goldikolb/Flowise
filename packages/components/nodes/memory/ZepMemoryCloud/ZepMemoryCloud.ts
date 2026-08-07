@@ -1,10 +1,27 @@
-import { IMessage, INode, INodeData, INodeParams, MemoryMethods, MessageType } from '../../../src/Interface'
-import { convertBaseMessagetoIMessage, getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
-import { ZepMemory, ZepMemoryInput } from '@getzep/zep-cloud/langchain'
-
+import { ZepCloudMemory } from '@langchain/community/memory/zep_cloud'
+import { BaseMessage } from '@langchain/core/messages'
+import { InputValues, MemoryVariables, OutputValues } from '@langchain/classic/memory'
 import { ICommonObject } from '../../../src'
-import { InputValues, MemoryVariables, OutputValues } from 'langchain/memory'
-import { BaseMessage } from 'langchain/schema'
+import { IMessage, INode, INodeData, INodeParams, MemoryMethods, MessageType } from '../../../src/Interface'
+import {
+    convertBaseMessagetoIMessage,
+    getBaseClasses,
+    getCredentialData,
+    getCredentialParam,
+    mapChatMessageToBaseMessage
+} from '../../../src/utils'
+
+interface ZepCloudMemoryInput {
+    apiKey: string
+    sessionId: string
+    aiPrefix?: string
+    humanPrefix?: string
+    memoryKey?: string
+    memoryType?: 'perpetual' | 'message_window'
+    returnMessages?: boolean
+    inputKey?: string
+    outputKey?: string
+}
 
 class ZepMemoryCloud_Memory implements INode {
     label: string
@@ -26,7 +43,7 @@ class ZepMemoryCloud_Memory implements INode {
         this.icon = 'zep.svg'
         this.category = 'Memory'
         this.description = 'Summarizes the conversation and stores the memory in zep server'
-        this.baseClasses = [this.type, ...getBaseClasses(ZepMemory)]
+        this.baseClasses = [this.type, ...getBaseClasses(ZepCloudMemory)]
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -97,7 +114,7 @@ class ZepMemoryCloud_Memory implements INode {
     }
 }
 
-const initializeZep = async (nodeData: INodeData, options: ICommonObject): Promise<ZepMemory> => {
+const initializeZep = async (nodeData: INodeData, options: ICommonObject): Promise<ZepCloudMemory> => {
     const aiPrefix = nodeData.inputs?.aiPrefix as string
     const humanPrefix = nodeData.inputs?.humanPrefix as string
     const memoryKey = nodeData.inputs?.memoryKey as string
@@ -108,7 +125,8 @@ const initializeZep = async (nodeData: INodeData, options: ICommonObject): Promi
 
     const credentialData = await getCredentialData(nodeData.credential ?? '', options)
     const apiKey = getCredentialParam('apiKey', credentialData, nodeData)
-    const obj: ZepMemoryInput & ZepMemoryExtendedInput = {
+    const orgId = options.orgId as string
+    const obj: ZepCloudMemoryInput & ZepMemoryExtendedInput = {
         apiKey,
         aiPrefix,
         humanPrefix,
@@ -116,7 +134,8 @@ const initializeZep = async (nodeData: INodeData, options: ICommonObject): Promi
         sessionId,
         inputKey,
         memoryType: memoryType,
-        returnMessages: true
+        returnMessages: true,
+        orgId
     }
 
     return new ZepMemoryExtended(obj)
@@ -124,14 +143,19 @@ const initializeZep = async (nodeData: INodeData, options: ICommonObject): Promi
 
 interface ZepMemoryExtendedInput {
     memoryType?: 'perpetual' | 'message_window'
+    orgId: string
+    inputKey?: string
+    returnMessages?: boolean
 }
 
-class ZepMemoryExtended extends ZepMemory implements MemoryMethods {
-    memoryType: 'perpetual' | 'message_window'
+class ZepMemoryExtended extends ZepCloudMemory implements MemoryMethods {
+    orgId: string
+    declare inputKey: string
 
-    constructor(fields: ZepMemoryInput & ZepMemoryExtendedInput) {
+    constructor(fields: ZepCloudMemoryInput & ZepMemoryExtendedInput) {
         super(fields)
-        this.memoryType = fields.memoryType ?? 'perpetual'
+        this.orgId = fields.orgId
+        this.inputKey = fields.inputKey ?? 'input'
     }
 
     async loadMemoryVariables(values: InputValues, overrideSessionId = ''): Promise<MemoryVariables> {
@@ -155,10 +179,17 @@ class ZepMemoryExtended extends ZepMemory implements MemoryMethods {
         return super.clear()
     }
 
-    async getChatMessages(overrideSessionId = '', returnBaseMessages = false): Promise<IMessage[] | BaseMessage[]> {
+    async getChatMessages(
+        overrideSessionId = '',
+        returnBaseMessages = false,
+        prependMessages?: IMessage[]
+    ): Promise<IMessage[] | BaseMessage[]> {
         const id = overrideSessionId ? overrideSessionId : this.sessionId
         const memoryVariables = await this.loadMemoryVariables({}, id)
         const baseMessages = memoryVariables[this.memoryKey]
+        if (prependMessages?.length) {
+            baseMessages.unshift(...(await mapChatMessageToBaseMessage(prependMessages, this.orgId)))
+        }
         return returnBaseMessages ? baseMessages : convertBaseMessagetoIMessage(baseMessages)
     }
 

@@ -1,12 +1,35 @@
-import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
+import { ICommonObject, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
-import { OpenAI, ALL_AVAILABLE_OPENAI_MODELS } from 'llamaindex'
+import { OpenAI } from 'llamaindex'
+import { getModels, MODEL_TYPE } from '../../../src/modelLoader'
 
 interface AzureOpenAIConfig {
     apiKey?: string
     endpoint?: string
     apiVersion?: string
     deploymentName?: string
+}
+
+const ALL_AZURE_OPENAI_CHAT_MODELS = {
+    'gpt-35-turbo': { contextWindow: 4096, openAIModel: 'gpt-3.5-turbo' },
+    'gpt-35-turbo-16k': {
+        contextWindow: 16384,
+        openAIModel: 'gpt-3.5-turbo-16k'
+    },
+    'gpt-4': { contextWindow: 8192, openAIModel: 'gpt-4' },
+    'gpt-4-32k': { contextWindow: 32768, openAIModel: 'gpt-4-32k' },
+    'gpt-4-turbo': {
+        contextWindow: 128000,
+        openAIModel: 'gpt-4-turbo'
+    },
+    'gpt-4-vision-preview': {
+        contextWindow: 128000,
+        openAIModel: 'gpt-4-vision-preview'
+    },
+    'gpt-4-1106-preview': {
+        contextWindow: 128000,
+        openAIModel: 'gpt-4-1106-preview'
+    }
 }
 
 class AzureChatOpenAI_LlamaIndex_ChatModels implements INode {
@@ -21,17 +44,21 @@ class AzureChatOpenAI_LlamaIndex_ChatModels implements INode {
     tags: string[]
     credential: INodeParams
     inputs: INodeParams[]
+    badge: string
+    deprecateMessage: string
 
     constructor() {
         this.label = 'AzureChatOpenAI'
         this.name = 'azureChatOpenAI_LlamaIndex'
-        this.version = 1.0
+        this.version = 2.0
         this.type = 'AzureChatOpenAI'
         this.icon = 'Azure.svg'
         this.category = 'Chat Models'
         this.description = 'Wrapper around Azure OpenAI Chat LLM specific for LlamaIndex'
         this.baseClasses = [this.type, 'BaseChatModel_LlamaIndex', ...getBaseClasses(OpenAI)]
         this.tags = ['LlamaIndex']
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage = 'LlamaIndex integration is deprecated and will be removed in a future release.'
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -42,27 +69,9 @@ class AzureChatOpenAI_LlamaIndex_ChatModels implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'gpt-4',
-                        name: 'gpt-4'
-                    },
-                    {
-                        label: 'gpt-4-32k',
-                        name: 'gpt-4-32k'
-                    },
-                    {
-                        label: 'gpt-3.5-turbo',
-                        name: 'gpt-3.5-turbo'
-                    },
-                    {
-                        label: 'gpt-3.5-turbo-16k',
-                        name: 'gpt-3.5-turbo-16k'
-                    }
-                ],
-                default: 'gpt-3.5-turbo-16k',
-                optional: true
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
+                default: 'gpt-3.5-turbo-16k'
             },
             {
                 label: 'Temperature',
@@ -99,8 +108,15 @@ class AzureChatOpenAI_LlamaIndex_ChatModels implements INode {
         ]
     }
 
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.CHAT, 'azureChatOpenAI_LlamaIndex')
+        }
+    }
+
     async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
-        const modelName = nodeData.inputs?.modelName as keyof typeof ALL_AVAILABLE_OPENAI_MODELS
+        const modelName = nodeData.inputs?.modelName as keyof typeof ALL_AZURE_OPENAI_CHAT_MODELS
         const temperature = nodeData.inputs?.temperature as string
         const maxTokens = nodeData.inputs?.maxTokens as string
         const topP = nodeData.inputs?.topP as string

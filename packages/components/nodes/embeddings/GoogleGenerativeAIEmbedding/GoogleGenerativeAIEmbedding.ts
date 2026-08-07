@@ -1,7 +1,27 @@
-import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
+import { ICommonObject, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
 import { GoogleGenerativeAIEmbeddings, GoogleGenerativeAIEmbeddingsParams } from '@langchain/google-genai'
 import { TaskType } from '@google/generative-ai'
+import { MODEL_TYPE, getModels } from '../../../src/modelLoader'
+
+class GoogleGenerativeAIEmbeddingsWithStripNewLines extends GoogleGenerativeAIEmbeddings {
+    stripNewLines: boolean
+
+    constructor(params: GoogleGenerativeAIEmbeddingsParams & { stripNewLines?: boolean }) {
+        super(params)
+        this.stripNewLines = params.stripNewLines ?? false
+    }
+
+    async embedDocuments(texts: string[]): Promise<number[][]> {
+        const processedTexts = this.stripNewLines ? texts.map((text) => text.replace(/\n/g, ' ')) : texts
+        return super.embedDocuments(processedTexts)
+    }
+
+    async embedQuery(text: string): Promise<number[]> {
+        const processedText = this.stripNewLines ? text.replace(/\n/g, ' ') : text
+        return super.embedQuery(processedText)
+    }
+}
 
 class GoogleGenerativeAIEmbedding_Embeddings implements INode {
     label: string
@@ -16,14 +36,14 @@ class GoogleGenerativeAIEmbedding_Embeddings implements INode {
     credential: INodeParams
 
     constructor() {
-        this.label = 'GoogleGenerativeAI Embeddings'
+        this.label = 'Google Gemini Embedding'
         this.name = 'googleGenerativeAiEmbeddings'
-        this.version = 1.0
+        this.version = 2.0
         this.type = 'GoogleGenerativeAiEmbeddings'
         this.icon = 'GoogleGemini.svg'
         this.category = 'Embeddings'
         this.description = 'Google Generative API to generate embeddings for a given text'
-        this.baseClasses = [this.type, ...getBaseClasses(GoogleGenerativeAIEmbeddings)]
+        this.baseClasses = [this.type, ...getBaseClasses(GoogleGenerativeAIEmbeddingsWithStripNewLines)]
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -36,14 +56,9 @@ class GoogleGenerativeAIEmbedding_Embeddings implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'embedding-001',
-                        name: 'embedding-001'
-                    }
-                ],
-                default: 'embedding-001'
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
+                default: 'gemini-embedding-001'
             },
             {
                 label: 'Task Type',
@@ -59,8 +74,23 @@ class GoogleGenerativeAIEmbedding_Embeddings implements INode {
                     { label: 'CLUSTERING', name: 'CLUSTERING' }
                 ],
                 default: 'TASK_TYPE_UNSPECIFIED'
+            },
+            {
+                label: 'Strip New Lines',
+                name: 'stripNewLines',
+                type: 'boolean',
+                optional: true,
+                additionalParams: true,
+                description: 'Remove new lines from input text before embedding to reduce token count'
             }
         ]
+    }
+
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.EMBEDDING, 'googleGenerativeAiEmbeddings')
+        }
     }
 
     // eslint-disable-next-line unused-imports/no-unused-vars
@@ -68,6 +98,7 @@ class GoogleGenerativeAIEmbedding_Embeddings implements INode {
         const modelName = nodeData.inputs?.modelName as string
         const credentialData = await getCredentialData(nodeData.credential ?? '', options)
         const apiKey = getCredentialParam('googleGenerativeAPIKey', credentialData, nodeData)
+        const stripNewLines = nodeData.inputs?.stripNewLines as boolean
 
         let taskType: TaskType
         switch (nodeData.inputs?.tasktype as string) {
@@ -90,13 +121,14 @@ class GoogleGenerativeAIEmbedding_Embeddings implements INode {
                 taskType = TaskType.TASK_TYPE_UNSPECIFIED
                 break
         }
-        const obj: GoogleGenerativeAIEmbeddingsParams = {
+        const obj: GoogleGenerativeAIEmbeddingsParams & { stripNewLines?: boolean } = {
             apiKey: apiKey,
             modelName: modelName,
-            taskType: taskType
+            taskType: taskType,
+            stripNewLines
         }
 
-        const model = new GoogleGenerativeAIEmbeddings(obj)
+        const model = new GoogleGenerativeAIEmbeddingsWithStripNewLines(obj)
         return model
     }
 }

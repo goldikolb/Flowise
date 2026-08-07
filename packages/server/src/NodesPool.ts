@@ -5,6 +5,7 @@ import { getNodeModulesPackagePath } from './utils'
 import { promises } from 'fs'
 import { ICommonObject } from 'flowise-components'
 import logger from './utils/logger'
+import { appConfig } from './AppConfig'
 
 export class NodesPool {
     componentNodes: IComponentNodes = {}
@@ -25,8 +26,18 @@ export class NodesPool {
     private async initializeNodes() {
         const packagePath = getNodeModulesPackagePath('flowise-components')
         const nodesPath = path.join(packagePath, 'dist', 'nodes')
-        const nodeFiles = await this.getFiles(nodesPath)
-        return Promise.all(
+        const nodes = await this.loadNodesFromDir(nodesPath)
+        Object.assign(this.componentNodes, nodes)
+    }
+
+    /**
+     * Load and filter nodes from a directory.
+     */
+    async loadNodesFromDir(dir: string): Promise<IComponentNodes> {
+        const disabled_nodes = process.env.DISABLED_NODES ? process.env.DISABLED_NODES.split(',') : []
+        const nodes: IComponentNodes = {}
+        const nodeFiles = await this.getFiles(dir)
+        await Promise.all(
             nodeFiles.map(async (file) => {
                 if (file.endsWith('.js')) {
                     try {
@@ -57,8 +68,17 @@ export class NodesPool {
                             }
 
                             const skipCategories = ['Analytic', 'SpeechToText']
-                            if (!skipCategories.includes(newNodeInstance.category)) {
-                                this.componentNodes[newNodeInstance.name] = newNodeInstance
+                            const conditionOne = !skipCategories.includes(newNodeInstance.category)
+
+                            const isCommunityNodesAllowed = appConfig.showCommunityNodes
+                            const isAuthorPresent = newNodeInstance.author
+                            let conditionTwo = true
+                            if (!isCommunityNodesAllowed && isAuthorPresent) conditionTwo = false
+
+                            const isDisabled = disabled_nodes.includes(newNodeInstance.name)
+
+                            if (conditionOne && conditionTwo && !isDisabled) {
+                                nodes[newNodeInstance.name] = newNodeInstance
                             }
                         }
                     } catch (err) {
@@ -67,6 +87,7 @@ export class NodesPool {
                 }
             })
         )
+        return nodes
     }
 
     /**

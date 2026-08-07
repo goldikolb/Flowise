@@ -1,6 +1,6 @@
 import { BaseRetriever } from '@langchain/core/retrievers'
 import { VectorStoreRetriever } from '@langchain/core/vectorstores'
-import { ContextualCompressionRetriever } from 'langchain/retrievers/contextual_compression'
+import { ContextualCompressionRetriever } from '@langchain/classic/retrievers/contextual_compression'
 import { VoyageAIRerank } from './VoyageAIRerank'
 import { getCredentialData, getCredentialParam, handleEscapeCharacters } from '../../../src'
 import { ICommonObject, INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
@@ -26,7 +26,6 @@ class VoyageAIRerankRetriever_Retrievers implements INode {
         this.type = 'VoyageAIRerankRetriever'
         this.icon = 'voyageai.png'
         this.category = 'Retrievers'
-        this.badge = 'NEW'
         this.description = 'Voyage AI Rerank indexes the documents from most to least semantically relevant to the query.'
         this.baseClasses = [this.type, 'BaseRetriever']
         this.credential = {
@@ -49,6 +48,18 @@ class VoyageAIRerankRetriever_Retrievers implements INode {
                     {
                         label: 'rerank-lite-1',
                         name: 'rerank-lite-1'
+                    },
+                    {
+                        label: 'rerank-lite-2',
+                        name: 'rerank-lite-2'
+                    },
+                    {
+                        label: 'rerank-1',
+                        name: 'rerank-1'
+                    },
+                    {
+                        label: 'rerank-2',
+                        name: 'rerank-2'
                     }
                 ],
                 default: 'rerank-lite-1',
@@ -111,11 +122,11 @@ class VoyageAIRerankRetriever_Retrievers implements INode {
         })
 
         if (output === 'retriever') return retriever
-        else if (output === 'document') return await retriever.getRelevantDocuments(query ? query : input)
+        else if (output === 'document') return await retriever._getRelevantDocuments(query ? query : input)
         else if (output === 'text') {
             let finaltext = ''
 
-            const docs = await retriever.getRelevantDocuments(query ? query : input)
+            const docs = await retriever._getRelevantDocuments(query ? query : input)
 
             for (const doc of docs) finaltext += `${doc.pageContent}\n`
 

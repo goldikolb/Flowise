@@ -1,32 +1,19 @@
 import { LLM, BaseLLMParams } from '@langchain/core/language_models/llms'
 import { getEnvironmentVariable } from '../../../src/utils'
+import { GenerationChunk } from '@langchain/core/outputs'
+import { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager'
 
 export interface HFInput {
-    /** Model to use */
     model: string
-
-    /** Sampling temperature to use */
     temperature?: number
-
-    /**
-     * Maximum number of tokens to generate in the completion.
-     */
     maxTokens?: number
-
-    /** Total probability mass of tokens to consider at each step */
+    stopSequences?: string[]
     topP?: number
-
-    /** Integer to define the top tokens considered within the sample operation to create new text. */
     topK?: number
-
-    /** Penalizes repeated tokens according to frequency */
     frequencyPenalty?: number
-
-    /** API key to use. */
     apiKey?: string
-
-    /** Private endpoint to use. */
-    endpoint?: string
+    endpointUrl?: string
+    includeCredentials?: string | boolean
 }
 
 export class HuggingFaceInference extends LLM implements HFInput {
@@ -40,6 +27,8 @@ export class HuggingFaceInference extends LLM implements HFInput {
 
     temperature: number | undefined = undefined
 
+    stopSequences: string[] | undefined = undefined
+
     maxTokens: number | undefined = undefined
 
     topP: number | undefined = undefined
@@ -50,7 +39,9 @@ export class HuggingFaceInference extends LLM implements HFInput {
 
     apiKey: string | undefined = undefined
 
-    endpoint: string | undefined = undefined
+    endpointUrl: string | undefined = undefined
+
+    includeCredentials: string | boolean | undefined = undefined
 
     constructor(fields?: Partial<HFInput> & BaseLLMParams) {
         super(fields ?? {})
@@ -58,14 +49,16 @@ export class HuggingFaceInference extends LLM implements HFInput {
         this.model = fields?.model ?? this.model
         this.temperature = fields?.temperature ?? this.temperature
         this.maxTokens = fields?.maxTokens ?? this.maxTokens
+        this.stopSequences = fields?.stopSequences ?? this.stopSequences
         this.topP = fields?.topP ?? this.topP
         this.topK = fields?.topK ?? this.topK
         this.frequencyPenalty = fields?.frequencyPenalty ?? this.frequencyPenalty
-        this.endpoint = fields?.endpoint ?? ''
         this.apiKey = fields?.apiKey ?? getEnvironmentVariable('HUGGINGFACEHUB_API_KEY')
-        if (!this.apiKey) {
+        this.endpointUrl = fields?.endpointUrl
+        this.includeCredentials = fields?.includeCredentials
+        if (!this.apiKey || this.apiKey.trim() === '') {
             throw new Error(
-                'Please set an API key for HuggingFace Hub in the environment variable HUGGINGFACEHUB_API_KEY or in the apiKey field of the HuggingFaceInference constructor.'
+                'Please set an API key for HuggingFace Hub. Either configure it in the credential settings in the UI, or set the environment variable HUGGINGFACEHUB_API_KEY.'
             )
         }
     }
@@ -74,38 +67,132 @@ export class HuggingFaceInference extends LLM implements HFInput {
         return 'hf'
     }
 
+    invocationParams(options?: this['ParsedCallOptions']) {
+        // Return parameters compatible with chatCompletion API (OpenAI-compatible format)
+        const params: any = {
+            temperature: this.temperature,
+            max_tokens: this.maxTokens,
+            stop: options?.stop ?? this.stopSequences,
+            top_p: this.topP
+        }
+        // Include optional parameters if they are defined
+        if (this.topK !== undefined) {
+            params.top_k = this.topK
+        }
+        if (this.frequencyPenalty !== undefined) {
+            params.frequency_penalty = this.frequencyPenalty
+        }
+        return params
+    }
+
+    async *_streamResponseChunks(
+        prompt: string,
+        options: this['ParsedCallOptions'],
+        runManager?: CallbackManagerForLLMRun
+    ): AsyncGenerator<GenerationChunk> {
+        try {
+            const client = await this._prepareHFInference()
+            const stream = await this.caller.call(async () =>
+                client.chatCompletionStream({
+                    model: this.model,
+                    messages: [{ role: 'user', content: prompt }],
+                    ...this.invocationParams(options)
+                })
+            )
+            for await (const chunk of stream) {
+                const token = chunk.choices[0]?.delta?.content || ''
+                if (token) {
+                    yield new GenerationChunk({ text: token, generationInfo: chunk })
+                    await runManager?.handleLLMNewToken(token)
+                }
+                // stream is done when finish_reason is set
+                if (chunk.choices[0]?.finish_reason) {
+                    yield new GenerationChunk({
+                        text: '',
+                        generationInfo: { finished: true }
+                    })
+                    break
+                }
+            }
+        } catch (error: any) {
+            console.error('[ChatHuggingFace] Error in _streamResponseChunks:', error)
+            // Provide more helpful error messages
+            if (error?.message?.includes('endpointUrl') || error?.message?.includes('third-party provider')) {
+                throw new Error(
+                    `Cannot use custom endpoint with model "${this.model}" that includes a provider. Please leave the Endpoint field blank in the UI. Original error: ${error.message}`
+                )
+            }
+            throw error
+        }
+    }
+
     /** @ignore */
     async _call(prompt: string, options: this['ParsedCallOptions']): Promise<string> {
-        const { HfInference } = await HuggingFaceInference.imports()
-        const hf = new HfInference(this.apiKey)
-        const obj: any = {
-            parameters: {
-                // make it behave similar to openai, returning only the generated text
-                return_full_text: false,
-                temperature: this.temperature,
-                max_new_tokens: this.maxTokens,
-                top_p: this.topP,
-                top_k: this.topK,
-                repetition_penalty: this.frequencyPenalty
-            },
-            inputs: prompt
+        try {
+            const client = await this._prepareHFInference()
+            // Use chatCompletion for chat models (v4 supports conversational models via Inference Providers)
+            const args = {
+                model: this.model,
+                messages: [{ role: 'user', content: prompt }],
+                ...this.invocationParams(options)
+            }
+            const res = await this.caller.callWithOptions({ signal: options.signal }, client.chatCompletion.bind(client), args)
+            const content = res.choices[0]?.message?.content || ''
+            if (!content) {
+                console.error('[ChatHuggingFace] No content in response:', JSON.stringify(res))
+                throw new Error(`No content received from HuggingFace API. Response: ${JSON.stringify(res)}`)
+            }
+            return content
+        } catch (error: any) {
+            console.error('[ChatHuggingFace] Error in _call:', error.message)
+            // Provide more helpful error messages
+            if (error?.message?.includes('endpointUrl') || error?.message?.includes('third-party provider')) {
+                throw new Error(
+                    `Cannot use custom endpoint with model "${this.model}" that includes a provider. Please leave the Endpoint field blank in the UI. Original error: ${error.message}`
+                )
+            }
+            if (error?.message?.includes('Invalid username or password') || error?.message?.includes('authentication')) {
+                throw new Error(
+                    `HuggingFace API authentication failed. Please verify your API key is correct and starts with "hf_". Original error: ${error.message}`
+                )
+            }
+            throw error
         }
-        if (this.endpoint) {
-            hf.endpoint(this.endpoint)
-        } else {
-            obj.model = this.model
+    }
+
+    /** @ignore */
+    private async _prepareHFInference() {
+        if (!this.apiKey || this.apiKey.trim() === '') {
+            console.error('[ChatHuggingFace] API key validation failed: Empty or undefined')
+            throw new Error('HuggingFace API key is required. Please configure it in the credential settings.')
         }
-        const res = await this.caller.callWithOptions({ signal: options.signal }, hf.textGeneration.bind(hf), obj)
-        return res.generated_text
+
+        const { InferenceClient } = await HuggingFaceInference.imports()
+        // Use InferenceClient for chat models (works better with Inference Providers)
+        const client = new InferenceClient(this.apiKey)
+
+        // Don't override endpoint if model uses a provider (contains ':') or if endpoint is router-based
+        // When using Inference Providers, endpoint should be left blank - InferenceClient handles routing automatically
+        if (
+            this.endpointUrl &&
+            !this.model.includes(':') &&
+            !this.endpointUrl.includes('/v1/chat/completions') &&
+            !this.endpointUrl.includes('router.huggingface.co')
+        ) {
+            return client.endpoint(this.endpointUrl)
+        }
+
+        // Return client without endpoint override - InferenceClient will use Inference Providers automatically
+        return client
     }
 
     /** @ignore */
     static async imports(): Promise<{
-        HfInference: typeof import('@huggingface/inference').HfInference
+        InferenceClient: typeof import('@huggingface/inference').InferenceClient
     }> {
         try {
-            const { HfInference } = await import('@huggingface/inference')
-            return { HfInference }
+            const { InferenceClient } = await import('@huggingface/inference')
+            return { InferenceClient }
         } catch (e) {
             throw new Error('Please install huggingface as a dependency with, e.g. `pnpm install @huggingface/inference`')
         }

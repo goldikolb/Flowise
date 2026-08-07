@@ -1,8 +1,9 @@
-import { GoogleAuthOptions } from 'google-auth-library'
 import { BaseCache } from '@langchain/core/caches'
-import { GoogleVertexAI, GoogleVertexAITextInput } from '@langchain/community/llms/googlevertexai'
-import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
-import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
+import { VertexAI, VertexAIInput } from '@langchain/google-vertexai'
+import { ICommonObject, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
+import { getBaseClasses } from '../../../src/utils'
+import { getModels, MODEL_TYPE } from '../../../src/modelLoader'
+import { buildGoogleCredentials } from '../../../src/google-utils'
 
 class GoogleVertexAI_LLMs implements INode {
     label: string
@@ -15,16 +16,20 @@ class GoogleVertexAI_LLMs implements INode {
     baseClasses: string[]
     credential: INodeParams
     inputs: INodeParams[]
+    badge: string
+    deprecateMessage: string
 
     constructor() {
         this.label = 'GoogleVertexAI'
         this.name = 'googlevertexai'
-        this.version = 2.0
+        this.version = 3.0
         this.type = 'GoogleVertexAI'
         this.icon = 'GoogleVertex.svg'
         this.category = 'LLMs'
         this.description = 'Wrapper around GoogleVertexAI large language models'
-        this.baseClasses = [this.type, ...getBaseClasses(GoogleVertexAI)]
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage = 'Use GoogleVertexAI Chat Models instead'
+        this.baseClasses = [this.type, ...getBaseClasses(VertexAI)]
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -44,33 +49,8 @@ class GoogleVertexAI_LLMs implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'text-bison',
-                        name: 'text-bison'
-                    },
-                    {
-                        label: 'code-bison',
-                        name: 'code-bison'
-                    },
-                    {
-                        label: 'code-gecko',
-                        name: 'code-gecko'
-                    },
-                    {
-                        label: 'text-bison-32k',
-                        name: 'text-bison-32k'
-                    },
-                    {
-                        label: 'code-bison-32k',
-                        name: 'code-bison-32k'
-                    },
-                    {
-                        label: 'code-gecko-32k',
-                        name: 'code-gecko-32k'
-                    }
-                ],
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
                 default: 'text-bison'
             },
             {
@@ -100,46 +80,33 @@ class GoogleVertexAI_LLMs implements INode {
         ]
     }
 
-    async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
-        const credentialData = await getCredentialData(nodeData.credential ?? '', options)
-        const googleApplicationCredentialFilePath = getCredentialParam('googleApplicationCredentialFilePath', credentialData, nodeData)
-        const googleApplicationCredential = getCredentialParam('googleApplicationCredential', credentialData, nodeData)
-        const projectID = getCredentialParam('projectID', credentialData, nodeData)
-
-        const authOptions: GoogleAuthOptions = {}
-        if (Object.keys(credentialData).length !== 0) {
-            if (!googleApplicationCredentialFilePath && !googleApplicationCredential)
-                throw new Error('Please specify your Google Application Credential')
-            if (!googleApplicationCredentialFilePath && !googleApplicationCredential)
-                throw new Error(
-                    'Error: More than one component has been inputted. Please use only one of the following: Google Application Credential File Path or Google Credential JSON Object'
-                )
-
-            if (googleApplicationCredentialFilePath && !googleApplicationCredential)
-                authOptions.keyFile = googleApplicationCredentialFilePath
-            else if (!googleApplicationCredentialFilePath && googleApplicationCredential)
-                authOptions.credentials = JSON.parse(googleApplicationCredential)
-
-            if (projectID) authOptions.projectId = projectID
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.LLM, 'googlevertexai')
         }
+    }
 
+    async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
         const temperature = nodeData.inputs?.temperature as string
         const modelName = nodeData.inputs?.modelName as string
         const maxOutputTokens = nodeData.inputs?.maxOutputTokens as string
         const topP = nodeData.inputs?.topP as string
         const cache = nodeData.inputs?.cache as BaseCache
 
-        const obj: Partial<GoogleVertexAITextInput> = {
+        const obj: Partial<VertexAIInput> = {
             temperature: parseFloat(temperature),
             model: modelName
         }
-        if (Object.keys(authOptions).length !== 0) obj.authOptions = authOptions
+
+        const authOptions = await buildGoogleCredentials(nodeData, options)
+        if (authOptions && Object.keys(authOptions).length !== 0) obj.authOptions = authOptions
 
         if (maxOutputTokens) obj.maxOutputTokens = parseInt(maxOutputTokens, 10)
         if (topP) obj.topP = parseFloat(topP)
         if (cache) obj.cache = cache
 
-        const model = new GoogleVertexAI(obj)
+        const model = new VertexAI(obj)
         return model
     }
 }

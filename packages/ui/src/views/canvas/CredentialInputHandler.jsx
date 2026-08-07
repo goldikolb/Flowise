@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 // material-ui
 import { IconButton } from '@mui/material'
-import { IconEdit } from '@tabler/icons'
+import { IconEdit } from '@tabler/icons-react'
 
 // project import
 import { AsyncDropdown } from '@/ui-component/dropdown/AsyncDropdown'
@@ -12,17 +12,20 @@ import CredentialListDialog from '@/views/credentials/CredentialListDialog'
 
 // API
 import credentialsApi from '@/api/credentials'
+import { useAuth } from '@/hooks/useAuth'
+import { FLOWISE_CREDENTIAL_ID } from '@/store/constant'
 
 // ===========================|| CredentialInputHandler ||=========================== //
 
 const CredentialInputHandler = ({ inputParam, data, onSelect, disabled = false }) => {
     const ref = useRef(null)
-    const [credentialId, setCredentialId] = useState(data?.credential ?? '')
+    const [credentialId, setCredentialId] = useState(data?.credential || (data?.inputs && data.inputs[FLOWISE_CREDENTIAL_ID]) || '')
     const [showCredentialListDialog, setShowCredentialListDialog] = useState(false)
     const [credentialListDialogProps, setCredentialListDialogProps] = useState({})
     const [showSpecificCredentialDialog, setShowSpecificCredentialDialog] = useState(false)
     const [specificCredentialDialogProps, setSpecificCredentialDialogProps] = useState({})
     const [reloadTimestamp, setReloadTimestamp] = useState(Date.now().toString())
+    const { hasPermission } = useAuth()
 
     const editCredential = (credentialId) => {
         const dialogProp = {
@@ -89,7 +92,7 @@ const CredentialInputHandler = ({ inputParam, data, onSelect, disabled = false }
     }
 
     useEffect(() => {
-        setCredentialId(data?.credential ?? '')
+        setCredentialId(data?.credential || (data?.inputs && data.inputs[FLOWISE_CREDENTIAL_ID]) || '')
     }, [data])
 
     return (
@@ -97,29 +100,26 @@ const CredentialInputHandler = ({ inputParam, data, onSelect, disabled = false }
             {inputParam && (
                 <>
                     {inputParam.type === 'credential' && (
-                        <>
-                            <div style={{ marginTop: 10 }} />
-                            <div key={reloadTimestamp} style={{ display: 'flex', flexDirection: 'row' }}>
-                                <AsyncDropdown
-                                    disabled={disabled}
-                                    name={inputParam.name}
-                                    nodeData={data}
-                                    value={credentialId ?? 'choose an option'}
-                                    isCreateNewOption={true}
-                                    credentialNames={inputParam.credentialNames}
-                                    onSelect={(newValue) => {
-                                        setCredentialId(newValue)
-                                        onSelect(newValue)
-                                    }}
-                                    onCreateNew={() => addAsyncOption(inputParam.name)}
-                                />
-                                {credentialId && (
-                                    <IconButton title='Edit' color='primary' size='small' onClick={() => editCredential(credentialId)}>
-                                        <IconEdit />
-                                    </IconButton>
-                                )}
-                            </div>
-                        </>
+                        <div key={reloadTimestamp} style={{ display: 'flex', flexDirection: 'row' }}>
+                            <AsyncDropdown
+                                disabled={disabled}
+                                name={inputParam.name}
+                                nodeData={data}
+                                value={credentialId ?? 'choose an option'}
+                                isCreateNewOption={hasPermission('credentials:create')}
+                                credentialNames={inputParam.credentialNames}
+                                onSelect={(newValue) => {
+                                    setCredentialId(newValue)
+                                    onSelect(newValue)
+                                }}
+                                onCreateNew={() => addAsyncOption(inputParam.name)}
+                            />
+                            {credentialId && hasPermission('credentials:update') && (
+                                <IconButton title='Edit' color='primary' size='small' onClick={() => editCredential(credentialId)}>
+                                    <IconEdit />
+                                </IconButton>
+                            )}
+                        </div>
                     )}
                 </>
             )}

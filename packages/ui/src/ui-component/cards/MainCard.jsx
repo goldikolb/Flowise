@@ -2,7 +2,6 @@ import PropTypes from 'prop-types'
 import { forwardRef } from 'react'
 
 // material-ui
-import { useTheme } from '@mui/material/styles'
 import { Card, CardContent, CardHeader, Divider, Typography } from '@mui/material'
 
 // constant
@@ -14,13 +13,16 @@ const headerSX = {
 
 const MainCard = forwardRef(function MainCard(
     {
-        border = true,
         boxShadow,
         children,
         content = true,
         contentClass = '',
-        contentSX = {},
+        contentSX = {
+            px: 2,
+            py: 0
+        },
         darkTitle,
+        maxWidth = 'full',
         secondary,
         shadow,
         sx = {},
@@ -29,18 +31,18 @@ const MainCard = forwardRef(function MainCard(
     },
     ref
 ) {
-    const theme = useTheme()
-
+    const otherProps = { ...others, border: others.border === false ? undefined : others.border }
     return (
         <Card
             ref={ref}
-            {...others}
+            {...otherProps}
             sx={{
-                border: border ? '1px solid' : 'none',
-                borderColor: theme.palette.primary[200] + 75,
+                background: 'transparent',
                 ':hover': {
                     boxShadow: boxShadow ? shadow || '0 2px 14px 0 rgb(32 40 45 / 8%)' : 'inherit'
                 },
+                maxWidth: maxWidth === 'sm' ? '800px' : maxWidth === 'md' ? '960px' : '1280px',
+                mx: 'auto',
                 ...sx
             }}
         >
@@ -65,6 +67,7 @@ const MainCard = forwardRef(function MainCard(
 MainCard.propTypes = {
     border: PropTypes.bool,
     boxShadow: PropTypes.bool,
+    maxWidth: PropTypes.oneOf(['full', 'sm', 'md']),
     children: PropTypes.node,
     content: PropTypes.bool,
     contentClass: PropTypes.string,

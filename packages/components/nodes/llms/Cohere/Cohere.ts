@@ -1,7 +1,8 @@
 import { BaseCache } from '@langchain/core/caches'
-import { ICommonObject, INode, INodeData, INodeParams } from '../../../src/Interface'
+import { Cohere, CohereInput } from '@langchain/cohere'
+import { ICommonObject, INode, INodeData, INodeOptionsValue, INodeParams } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
-import { Cohere, CohereInput } from './core'
+import { getModels, MODEL_TYPE } from '../../../src/modelLoader'
 
 class Cohere_LLMs implements INode {
     label: string
@@ -14,15 +15,19 @@ class Cohere_LLMs implements INode {
     baseClasses: string[]
     credential: INodeParams
     inputs: INodeParams[]
+    badge: string
+    deprecateMessage: string
 
     constructor() {
         this.label = 'Cohere'
         this.name = 'cohere'
-        this.version = 2.0
+        this.version = 3.0
         this.type = 'Cohere'
         this.icon = 'Cohere.svg'
         this.category = 'LLMs'
         this.description = 'Wrapper around Cohere large language models'
+        this.badge = 'DEPRECATING'
+        this.deprecateMessage = 'Use Cohere Chat Models instead'
         this.baseClasses = [this.type, ...getBaseClasses(Cohere)]
         this.credential = {
             label: 'Connect Credential',
@@ -40,35 +45,9 @@ class Cohere_LLMs implements INode {
             {
                 label: 'Model Name',
                 name: 'modelName',
-                type: 'options',
-                options: [
-                    {
-                        label: 'command',
-                        name: 'command'
-                    },
-                    {
-                        label: 'command-light',
-                        name: 'command-light'
-                    },
-                    {
-                        label: 'command-nightly',
-                        name: 'command-nightly'
-                    },
-                    {
-                        label: 'command-light-nightly',
-                        name: 'command-light-nightly'
-                    },
-                    {
-                        label: 'base',
-                        name: 'base'
-                    },
-                    {
-                        label: 'base-light',
-                        name: 'base-light'
-                    }
-                ],
-                default: 'command',
-                optional: true
+                type: 'asyncOptions',
+                loadMethod: 'listModels',
+                default: 'command'
             },
             {
                 label: 'Temperature',
@@ -88,6 +67,12 @@ class Cohere_LLMs implements INode {
         ]
     }
 
+    //@ts-ignore
+    loadMethods = {
+        async listModels(): Promise<INodeOptionsValue[]> {
+            return await getModels(MODEL_TYPE.LLM, 'cohere')
+        }
+    }
     async init(nodeData: INodeData, _: string, options: ICommonObject): Promise<any> {
         const temperature = nodeData.inputs?.temperature as string
         const modelName = nodeData.inputs?.modelName as string

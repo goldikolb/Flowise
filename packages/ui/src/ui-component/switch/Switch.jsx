@@ -3,10 +3,10 @@ import PropTypes from 'prop-types'
 import { FormControl, Switch, Typography } from '@mui/material'
 
 export const SwitchInput = ({ label, value, onChange, disabled = false }) => {
-    const [myValue, setMyValue] = useState(!!value ?? false)
+    const [myValue, setMyValue] = useState(value !== undefined ? !!value : false)
 
     useEffect(() => {
-        setMyValue(value)
+        setMyValue(value !== undefined ? !!value : false)
     }, [value])
 
     return (

@@ -125,11 +125,22 @@ const MarketplaceCanvasNode = ({ data }) => {
                     {data.inputAnchors.map((inputAnchor, index) => (
                         <NodeInputHandler disabled={true} key={index} inputAnchor={inputAnchor} data={data} />
                     ))}
-                    {data.inputParams.map((inputParam, index) => (
-                        <NodeInputHandler disabled={true} key={index} inputParam={inputParam} data={data} />
-                    ))}
+                    {data.inputParams
+                        .filter((inputParam) => inputParam.display !== false)
+                        .map((inputParam, index) => (
+                            <NodeInputHandler disabled={true} key={index} inputParam={inputParam} data={data} />
+                        ))}
                     {data.inputParams.find((param) => param.additionalParams) && (
-                        <div style={{ textAlign: 'center' }}>
+                        <div
+                            style={{
+                                textAlign: 'center',
+                                marginTop:
+                                    data.inputParams.filter((param) => param.additionalParams).length ===
+                                    data.inputParams.length + data.inputAnchors.length
+                                        ? 20
+                                        : 0
+                            }}
+                        >
                             <Button sx={{ borderRadius: 25, width: '90%', mb: 2 }} variant='outlined' onClick={onDialogClicked}>
                                 Additional Parameters
                             </Button>

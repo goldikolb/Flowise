@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
 
 // material-ui
-import { Button, Box } from '@mui/material'
-import { IconX } from '@tabler/icons'
+import { Button, Box, Stack } from '@mui/material'
+import { IconX } from '@tabler/icons-react'
 
 // Project import
 import { StyledButton } from '@/ui-component/button/StyledButton'
@@ -17,7 +17,7 @@ import useNotifier from '@/utils/useNotifier'
 // API
 import chatflowsApi from '@/api/chatflows'
 
-const ChatFeedback = ({ dialogProps }) => {
+const ChatFeedback = ({ dialogProps, onConfirm }) => {
     const dispatch = useDispatch()
 
     useNotifier()
@@ -57,11 +57,13 @@ const ChatFeedback = ({ dialogProps }) => {
                     }
                 })
                 dispatch({ type: SET_CHATFLOW, chatflow: saveResp.data })
+                onConfirm?.()
             }
         } catch (error) {
-            const errorData = error.response.data || `${error.response.status}: ${error.response.statusText}`
             enqueueSnackbar({
-                message: `Failed to save Chat Feedback Settings: ${errorData}`,
+                message: `Failed to save Chat Feedback Settings: ${
+                    typeof error.response.data === 'object' ? error.response.data.message : error.response.data
+                }`,
                 options: {
                     key: new Date().getTime() + Math.random(),
                     variant: 'error',
@@ -89,19 +91,20 @@ const ChatFeedback = ({ dialogProps }) => {
     }, [dialogProps])
 
     return (
-        <>
-            <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <SwitchInput label='Enable chat feedback' onChange={handleChange} value={chatFeedbackStatus} />
+        <Stack direction='column' spacing={2} sx={{ width: '100%' }}>
+            <SwitchInput label='Enable chat feedback' onChange={handleChange} value={chatFeedbackStatus} />
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', width: '100%', mt: 2 }}>
+                <StyledButton variant='contained' onClick={onSave} sx={{ minWidth: 100 }}>
+                    Save
+                </StyledButton>
             </Box>
-            <StyledButton style={{ marginBottom: 10, marginTop: 10 }} variant='contained' onClick={onSave}>
-                Save
-            </StyledButton>
-        </>
+        </Stack>
     )
 }
 
 ChatFeedback.propTypes = {
-    dialogProps: PropTypes.object
+    dialogProps: PropTypes.object,
+    onConfirm: PropTypes.func
 }
 
 export default ChatFeedback

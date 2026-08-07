@@ -16,9 +16,9 @@ class ChatHuggingFace_ChatModels implements INode {
     inputs: INodeParams[]
 
     constructor() {
-        this.label = 'ChatHuggingFace'
+        this.label = 'HuggingFace'
         this.name = 'chatHuggingFace'
-        this.version = 2.0
+        this.version = 3.0
         this.type = 'ChatHuggingFace'
         this.icon = 'HuggingFace.svg'
         this.category = 'Chat Models'
@@ -41,16 +41,17 @@ class ChatHuggingFace_ChatModels implements INode {
                 label: 'Model',
                 name: 'model',
                 type: 'string',
-                description: 'If using own inference endpoint, leave this blank',
-                placeholder: 'gpt2',
-                optional: true
+                description:
+                    'Model name (e.g., deepseek-ai/DeepSeek-V3.2-Exp:novita). If model includes provider (:) or using router endpoint, leave Endpoint blank.',
+                placeholder: 'deepseek-ai/DeepSeek-V3.2-Exp:novita'
             },
             {
                 label: 'Endpoint',
                 name: 'endpoint',
                 type: 'string',
                 placeholder: 'https://xyz.eu-west-1.aws.endpoints.huggingface.cloud/gpt2',
-                description: 'Using your own inference endpoint',
+                description:
+                    'Custom inference endpoint (optional). Not needed for models with providers (:) or router endpoints. Leave blank to use Inference Providers.',
                 optional: true
             },
             {
@@ -97,6 +98,16 @@ class ChatHuggingFace_ChatModels implements INode {
                 description: 'Frequency Penalty parameter may not apply to certain model. Please check available model parameters',
                 optional: true,
                 additionalParams: true
+            },
+            {
+                label: 'Stop Sequence',
+                name: 'stop',
+                type: 'string',
+                rows: 4,
+                placeholder: 'AI assistant:',
+                description: 'Sets the stop sequences to use. Use comma to separate different sequences.',
+                optional: true,
+                additionalParams: true
             }
         ]
     }
@@ -110,9 +121,19 @@ class ChatHuggingFace_ChatModels implements INode {
         const frequencyPenalty = nodeData.inputs?.frequencyPenalty as string
         const endpoint = nodeData.inputs?.endpoint as string
         const cache = nodeData.inputs?.cache as BaseCache
+        const stop = nodeData.inputs?.stop as string
 
         const credentialData = await getCredentialData(nodeData.credential ?? '', options)
         const huggingFaceApiKey = getCredentialParam('huggingFaceApiKey', credentialData, nodeData)
+
+        if (!huggingFaceApiKey) {
+            console.error('[ChatHuggingFace] API key validation failed: No API key found')
+            throw new Error('HuggingFace API key is required. Please configure it in the credential settings.')
+        }
+
+        if (!huggingFaceApiKey.startsWith('hf_')) {
+            console.warn('[ChatHuggingFace] API key format warning: Key does not start with "hf_"')
+        }
 
         const obj: Partial<HFInput> = {
             model,
@@ -124,7 +145,11 @@ class ChatHuggingFace_ChatModels implements INode {
         if (topP) obj.topP = parseFloat(topP)
         if (hfTopK) obj.topK = parseFloat(hfTopK)
         if (frequencyPenalty) obj.frequencyPenalty = parseFloat(frequencyPenalty)
-        if (endpoint) obj.endpoint = endpoint
+        if (endpoint) obj.endpointUrl = endpoint
+        if (stop) {
+            const stopSequences = stop.split(',')
+            obj.stopSequences = stopSequences
+        }
 
         const huggingFace = new HuggingFaceInference(obj)
         if (cache) huggingFace.cache = cache

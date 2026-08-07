@@ -9,8 +9,9 @@ import {
 } from '@langchain/community/vectorstores/vectara'
 import { Document } from '@langchain/core/documents'
 import { Embeddings } from '@langchain/core/embeddings'
-import { ICommonObject, INode, INodeData, INodeOutputsValue, INodeParams } from '../../../src/Interface'
+import { ICommonObject, INode, INodeData, INodeOutputsValue, INodeParams, IndexingResult } from '../../../src/Interface'
 import { getBaseClasses, getCredentialData, getCredentialParam } from '../../../src/utils'
+import { getFileFromStorage } from '../../../src'
 
 class Vectara_VectorStores implements INode {
     label: string
@@ -35,7 +36,6 @@ class Vectara_VectorStores implements INode {
         this.category = 'Vector Stores'
         this.description = 'Upsert embedded data and perform similarity search upon query using Vectara, a LLM-powered search-as-a-service'
         this.baseClasses = [this.type, 'VectorStoreRetriever', 'BaseRetriever']
-        this.badge = 'NEW'
         this.credential = {
             label: 'Connect Credential',
             name: 'credential',
@@ -65,7 +65,8 @@ class Vectara_VectorStores implements INode {
                     'Filter to apply to Vectara metadata. Refer to the <a target="_blank" href="https://docs.flowiseai.com/vector-stores/vectara">documentation</a> on how to use Vectara filters with Flowise.',
                 type: 'string',
                 additionalParams: true,
-                optional: true
+                optional: true,
+                acceptVariable: true
             },
             {
                 label: 'Sentences Before',
@@ -144,7 +145,7 @@ class Vectara_VectorStores implements INode {
 
     //@ts-ignore
     vectorStoreMethods = {
-        async upsert(nodeData: INodeData, options: ICommonObject): Promise<void> {
+        async upsert(nodeData: INodeData, options: ICommonObject): Promise<Partial<IndexingResult>> {
             const credentialData = await getCredentialData(nodeData.credential ?? '', options)
             const apiKey = getCredentialParam('apiKey', credentialData, nodeData)
             const customerId = getCredentialParam('customerID', credentialData, nodeData)
@@ -182,20 +183,39 @@ class Vectara_VectorStores implements INode {
                 }
             }
 
-            let files: string[] = []
-            if (fileBase64.startsWith('[') && fileBase64.endsWith(']')) {
-                files = JSON.parse(fileBase64)
-            } else {
-                files = [fileBase64]
-            }
-
             const vectaraFiles: VectaraFile[] = []
-            for (const file of files) {
-                const splitDataURI = file.split(',')
-                splitDataURI.pop()
-                const bf = Buffer.from(splitDataURI.pop() || '', 'base64')
-                const blob = new Blob([bf])
-                vectaraFiles.push({ blob: blob, fileName: getFileName(file) })
+            let files: string[] = []
+            if (fileBase64.startsWith('FILE-STORAGE::')) {
+                const fileName = fileBase64.replace('FILE-STORAGE::', '')
+                if (fileName.startsWith('[') && fileName.endsWith(']')) {
+                    files = JSON.parse(fileName)
+                } else {
+                    files = [fileName]
+                }
+                const orgId = options.orgId
+                const chatflowid = options.chatflowid
+
+                for (const file of files) {
+                    if (!file) continue
+                    const fileData = await getFileFromStorage(file, orgId, chatflowid)
+                    const blob = new Blob([new Uint8Array(fileData)])
+                    vectaraFiles.push({ blob: blob, fileName: getFileName(file) })
+                }
+            } else {
+                if (fileBase64.startsWith('[') && fileBase64.endsWith(']')) {
+                    files = JSON.parse(fileBase64)
+                } else {
+                    files = [fileBase64]
+                }
+
+                for (const file of files) {
+                    if (!file) continue
+                    const splitDataURI = file.split(',')
+                    splitDataURI.pop()
+                    const bf = Buffer.from(splitDataURI.pop() || '', 'base64')
+                    const blob = new Blob([bf])
+                    vectaraFiles.push({ blob: blob, fileName: getFileName(file) })
+                }
             }
 
             try {
@@ -204,6 +224,7 @@ class Vectara_VectorStores implements INode {
                     const vectorStore = new VectaraStore(vectaraArgs)
                     await vectorStore.addFiles(vectaraFiles)
                 }
+                return { numAdded: finalDocs.length, addedDocs: finalDocs }
             } catch (e) {
                 throw new Error(e)
             }
@@ -254,6 +275,9 @@ class Vectara_VectorStores implements INode {
             return retriever
         } else if (output === 'vectorStore') {
             ;(vectorStore as any).k = k
+            if (vectaraMetadataFilter) {
+                ;(vectorStore as any).filter = vectaraFilter.filter
+            }
             return vectorStore
         }
         return vectorStore

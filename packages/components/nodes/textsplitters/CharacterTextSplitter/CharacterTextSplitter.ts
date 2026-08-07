@@ -1,6 +1,6 @@
 import { INode, INodeData, INodeParams } from '../../../src/Interface'
 import { getBaseClasses } from '../../../src/utils'
-import { CharacterTextSplitter, CharacterTextSplitterParams } from 'langchain/text_splitter'
+import { CharacterTextSplitter, CharacterTextSplitterParams } from '@langchain/textsplitters'
 
 class CharacterTextSplitter_TextSplitters implements INode {
     label: string
@@ -27,6 +27,7 @@ class CharacterTextSplitter_TextSplitters implements INode {
                 label: 'Chunk Size',
                 name: 'chunkSize',
                 type: 'number',
+                description: 'Number of characters in each chunk. Default is 1000.',
                 default: 1000,
                 optional: true
             },
@@ -34,6 +35,8 @@ class CharacterTextSplitter_TextSplitters implements INode {
                 label: 'Chunk Overlap',
                 name: 'chunkOverlap',
                 type: 'number',
+                description: 'Number of characters to overlap between chunks. Default is 200.',
+                default: 200,
                 optional: true
             },
             {
